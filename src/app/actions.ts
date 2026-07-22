@@ -5,6 +5,7 @@ import { chat } from "@trigger.dev/sdk/ai";
 import type { plantInvestigate } from "@/trigger/plant-investigate";
 import type { plantParallelInvestigate } from "@/trigger/plant-parallel-investigate";
 import type { plantRouteInvestigate } from "@/trigger/plant-route-investigate";
+import type { plantReplayBurst } from "@/trigger/plant-replay";
 
 export const startChatSession = chat.createStartSessionAction("plantos-agent");
 
@@ -54,5 +55,13 @@ export async function triggerPlantParallelInvestigate(payload?: { question?: str
     "plant-parallel-investigate",
     payload ?? {}
   );
+  return mintRunToken(handle.id);
+}
+
+/** Phase 3: denser on-demand replay burst + Realtime subscribe credentials. */
+export async function triggerPlantReplayBurst(payload?: { reason?: string }) {
+  const handle = await tasks.trigger<typeof plantReplayBurst>("plant-replay-burst", {
+    reason: payload?.reason ?? "ui-start",
+  });
   return mintRunToken(handle.id);
 }

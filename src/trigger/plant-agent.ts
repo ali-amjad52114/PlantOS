@@ -1,4 +1,4 @@
-import { prompts } from "@trigger.dev/sdk";
+import { logger, metadata, prompts } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
@@ -6,7 +6,8 @@ import { createProviderRegistry, stepCountIs, streamText, tool } from "ai";
 import type { InferUITools, UIMessage } from "ai";
 import { z } from "zod";
 import { catalogPromptSection, normalizeSpec, validateSpec } from "../lib/catalog";
-import type { PlantChatDataTypes } from "../lib/plant-chat-types";
+import type { PlantChatDataTypes, PlantRole } from "../lib/plant-chat-types";
+import { plantClientDataSchema } from "../lib/plant-chat-types";
 import { defaultPlantTower } from "../lib/plant-tower";
 import { engineerSnapshot, financeSnapshot, operationsSnapshot } from "../lib/plant-services";
 import { getReplayControl, tickReplay } from "../lib/replay";
@@ -27,6 +28,9 @@ function getClickHouse(): ClickHouseClient {
   return clickhouse;
 }
 
+/** Per-run turn clock for audit elapsedMs (init in onBoot). */
+const turnClock = chat.local<{ startedAt: number }>({ id: "plantos-turn-clock" });
+
 function writeStep(data: PlantChatDataTypes["investigation-step"]) {
   chat.response.write({
     type: "data-investigation-step",
@@ -36,7 +40,7 @@ function writeStep(data: PlantChatDataTypes["investigation-step"]) {
   });
 }
 
-function writeTower(role: "engineer" | "operations" | "finance") {
+function writeTower(role: PlantRole) {
   const tower = defaultPlantTower(role);
   chat.response.write({
     type: "data-plant-tower",
@@ -177,7 +181,8 @@ const renderVisualization = tool({
   },
 });
 
-const tools = {
+/** Full tool map for UIMessage typing; runtime tools are a per-role subset. */
+const allTools = {
   investigateEngineer,
   investigateOperations,
   investigateFinance,
@@ -186,10 +191,43 @@ const tools = {
   renderVisualization,
 };
 
+function toolsForClientData(clientData: z.infer<typeof plantClientDataSchema> | undefined) {
+  const role: PlantRole = clientData?.role ?? "engineer";
+  const allowAdvance = clientData?.allowAdvanceReplay === true;
+  const shared = {
+    getLivePlantStatus,
+    renderVisualization,
+    ...(allowAdvance ? { advanceReplay } : {}),
+  };
+  if (role === "operations") return { ...shared, investigateOperations };
+  if (role === "finance") return { ...shared, investigateFinance };
+  return { ...shared, investigateEngineer };
+}
+
+function toolNamesFromParts(parts: unknown[] | undefined): string[] {
+  if (!parts?.length) return [];
+  const names: string[] = [];
+  for (const part of parts as Array<{ type?: string }>) {
+    const t = part.type ?? "";
+    if (t.startsWith("tool-")) names.push(t.slice("tool-".length));
+  }
+  return names;
+}
+
+function towerDeckFromParts(parts: unknown[] | undefined): number | undefined {
+  if (!parts?.length) return undefined;
+  for (const part of parts as Array<{ type?: string; data?: { deck?: number } }>) {
+    if (part.type === "data-plant-tower" && typeof part.data?.deck === "number") {
+      return part.data.deck;
+    }
+  }
+  return undefined;
+}
+
 export type PlantChatUIMessage = UIMessage<
   unknown,
   PlantChatDataTypes,
-  InferUITools<typeof tools>
+  InferUITools<typeof allTools>
 >;
 
 const registry = createProviderRegistry({ openai });
@@ -203,14 +241,13 @@ const systemPrompt = prompts.define({
   }),
   content: `You are PlantOS, an industrial plant intelligence orchestrator over a continuously replaying HAI normal-operation dataset stored in ClickHouse.
 
-Roles and tools:
-- Engineer questions → call investigateEngineer
-- Operations / production / target / bottleneck → call investigateOperations
-- Finance / value / cost / margin → call investigateFinance
-- Live feed questions → call getLivePlantStatus (and advanceReplay only if asked to tick the plant)
+Role context:
+- The active role arrives as typed **clientData.role** (engineer | operations | finance). Do not expect a [role=…] prefix in the user message.
+- Only the matching investigate* tool is available this turn — call it for plant questions in that role.
+- Live feed questions → call getLivePlantStatus. advanceReplay is only available when explicitly enabled; prefer not to tick the plant yourself.
 
 Presenting results:
-- Calling investigateEngineer / investigateOperations / investigateFinance **automatically streams a 4-card Lovable plant tower** into the chat (durable). Do not describe that tower as a markdown table.
+- Calling the role investigate tool **automatically streams a 4-card Lovable plant tower** into the chat (durable). Do not describe that tower as a markdown table.
 - Optionally call renderVisualization **once** for an extra chart/table if the tower is not enough.
 - After tools, add at most a one-or-two-sentence takeaway. Never dump raw tag tables as markdown.
 - Production and finance dollar figures are SYNTHETIC DEMO ASSUMPTIONS — say so briefly when discussing money.
@@ -224,29 +261,89 @@ Presenting results:
 
 export const plantAgent = chat
   .withUIMessage<PlantChatUIMessage>()
+  .withClientData({ schema: plantClientDataSchema })
   .agent({
     id: "plantos-agent",
     idleTimeoutInSeconds: 300,
-    tools,
+    tools: ({ clientData }) => toolsForClientData(clientData),
+    onBoot: async () => {
+      turnClock.init({ startedAt: 0 });
+    },
     onChatStart: async () => {
       const resolved = await systemPrompt.resolve({
         componentReference: catalogPromptSection(),
       });
       chat.prompt.set(resolved);
     },
-    onTurnStart: async ({ writer }) => {
+    onTurnStart: async ({ writer, clientData, turn }) => {
+      const role: PlantRole = clientData?.role ?? "engineer";
+      turnClock.startedAt = Date.now();
+      const available = Object.keys(toolsForClientData(clientData));
+      metadata.set("role", role).set("turn", turn).set("phase", "turn-start");
+      logger.info("plantos turn start", { turn, role, tools: available });
+      writer.write({
+        type: "data-turn-audit",
+        id: `turn-${turn}-start`,
+        data: {
+          turn,
+          role,
+          toolNames: available,
+          status: "started",
+        },
+        transient: true,
+      });
       writer.write({
         type: "data-investigation-step",
         id: "turn-start",
         data: {
           id: "turn-start",
-          label: "Starting plant investigation turn",
+          label: `Starting ${role} investigation turn`,
           status: "running",
+          role,
         },
         transient: true,
       });
     },
-    run: async ({ messages, tools: resolvedTools, signal }) => {
+    onBeforeTurnComplete: async ({ writer, clientData, turn, responseMessage }) => {
+      const role: PlantRole = clientData?.role ?? "engineer";
+      const parts = (responseMessage as { parts?: unknown[] } | undefined)?.parts;
+      const toolNames = toolNamesFromParts(parts);
+      const towerDeck = towerDeckFromParts(parts);
+      const startedAt = turnClock.startedAt || Date.now();
+      const elapsedMs = Math.max(0, Date.now() - startedAt);
+      writer.write({
+        type: "data-turn-audit",
+        id: `turn-${turn}-complete`,
+        data: {
+          turn,
+          role,
+          toolNames,
+          towerDeck,
+          elapsedMs,
+          status: "complete",
+        },
+        transient: true,
+      });
+    },
+    onTurnComplete: async ({ clientData, turn, responseMessage }) => {
+      const role: PlantRole = clientData?.role ?? "engineer";
+      const parts = (responseMessage as { parts?: unknown[] } | undefined)?.parts;
+      const toolNames = toolNamesFromParts(parts);
+      const towerDeck = towerDeckFromParts(parts);
+      const startedAt = turnClock.startedAt || Date.now();
+      const elapsedMs = Math.max(0, Date.now() - startedAt);
+      metadata
+        .set("role", role)
+        .set("turn", turn)
+        .set("phase", "turn-complete")
+        .set("toolNames", toolNames)
+        .set("towerDeck", towerDeck ?? null)
+        .set("elapsedMs", elapsedMs);
+      logger.info("plantos turn complete", { turn, role, toolNames, towerDeck, elapsedMs });
+    },
+    run: async ({ messages, tools: resolvedTools, signal, clientData }) => {
+      const role = clientData?.role ?? "engineer";
+      metadata.set("role", role).set("phase", "run");
       if (!messages?.length) {
         console.warn("plantos-agent: empty messages on run — skipping streamText");
         return streamText({

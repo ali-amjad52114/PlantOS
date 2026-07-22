@@ -20,7 +20,7 @@
 
 Root cause: `PlantChat` `useEffect([messages, onToolVisual])` re-fired on every streaming `messages` identity change and called `onToolVisual` → parent `setState` unboundedly.
 
-Change: dedupe by `messageId:toolCallId:role` + `onToolVisualRef` (see `plantos/src/components/plant-chat.tsx`).
+Change: dedupe by `messageId:toolCallId:role` + `onToolVisualRef` (see `src/components/plant-chat.tsx`).
 
 Re-proof: `node scripts/browser-e2e-agent-only.mjs` → `ok: true`, status READY, `sawError: false`, console clean.
 
@@ -103,7 +103,7 @@ Next checkpoint: patch chat effect, re-run agent-only until READY with viz and n
 ## How to re-run
 
 ```bash
-cd plantos
+cd .   # repo root (formerly plantos/)
 node scripts/browser-e2e-engineer.mjs
 node scripts/browser-e2e-agent-only.mjs
 ```

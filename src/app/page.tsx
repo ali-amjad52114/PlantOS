@@ -4,12 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import {
   triggerPlantInvestigate,
   triggerPlantParallelInvestigate,
+  triggerPlantReplayBurst,
   triggerPlantRouteInvestigate,
 } from "@/app/actions";
 import { PlantChat, RoleVisual } from "@/components/plant-chat";
 import { PreBuiltCatalog } from "@/components/pre-built-catalog";
+import { ReplayHealth } from "@/components/replay-health";
 import { RunProgress } from "@/components/run-progress";
 import { useRealtimeInvestigate } from "@/hooks/useRealtimeInvestigate";
+import { useRealtimeReplay } from "@/hooks/useRealtimeReplay";
 
 type Role = "engineer" | "operations" | "finance";
 type MainView = "plant" | "prebuilt";
@@ -32,10 +35,13 @@ export default function PlantOSPage() {
   const [agentVisuals, setAgentVisuals] = useState<Partial<Record<Role, any>>>({});
   const [rtRunId, setRtRunId] = useState<string | undefined>();
   const [rtToken, setRtToken] = useState<string | undefined>();
+  const [replayRunId, setReplayRunId] = useState<string | undefined>();
+  const [replayToken, setReplayToken] = useState<string | undefined>();
   const [routeQuestion, setRouteQuestion] = useState<string>(SUGGESTED_ROUTE.engineer);
   const [routeNote, setRouteNote] = useState<string | null>(null);
 
   const rtProgress = useRealtimeInvestigate(rtRunId, rtToken);
+  const replayProgress = useRealtimeReplay(replayRunId, replayToken);
 
   const refreshLive = useCallback(async () => {
     try {
@@ -44,7 +50,7 @@ export default function PlantOSPage() {
     } catch {}
   }, []);
 
-  // Observe-only: Trigger plant-replay-tick owns writes (Phase 0 — no browser tick writer).
+  // Observe-only: Trigger plant-replay-tick / burst owns writes (Phase 0+3 — no browser tick writer).
   useEffect(() => {
     refreshLive();
     const id = setInterval(() => {
@@ -52,6 +58,18 @@ export default function PlantOSPage() {
     }, 10000);
     return () => clearInterval(id);
   }, [refreshLive]);
+
+  // Refresh CH live badge when Realtime replay metadata advances
+  useEffect(() => {
+    if (replayProgress.status === "running" || replayProgress.status === "complete") {
+      void refreshLive();
+    }
+  }, [
+    replayProgress.status,
+    replayProgress.insertedRows,
+    replayProgress.tickIndex,
+    refreshLive,
+  ]);
 
   // When Trigger investigate / route / parallel completes, paint visuals
   useEffect(() => {
@@ -87,11 +105,25 @@ export default function PlantOSPage() {
   }, [rtProgress.status, rtProgress.output]);
 
   async function replay(action: "start" | "pause" | "reset" | "speed", speed?: number) {
+    setError(null);
     await fetch("/api/plant/replay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, speed }),
     });
+    // Phase 3: Start flips control-plane then fires Trigger burst (Realtime-visible).
+    // No browser tick loop — denser writes stay inside Trigger queue concurrency 1.
+    if (action === "start") {
+      try {
+        const { runId, publicAccessToken } = await triggerPlantReplayBurst({
+          reason: "ui-start",
+        });
+        setReplayRunId(runId);
+        setReplayToken(publicAccessToken);
+      } catch (e: any) {
+        setError(String(e.message || e));
+      }
+    }
     await refreshLive();
   }
 
@@ -186,28 +218,45 @@ export default function PlantOSPage() {
           </div>
         </header>
 
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <span className="text-xs uppercase tracking-wide text-zinc-500">Replay</span>
-          <button onClick={() => replay("start")} className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs ring-1 ring-zinc-700">
-            Start
-          </button>
-          <button onClick={() => replay("pause")} className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs ring-1 ring-zinc-700">
-            Pause
-          </button>
-          <button onClick={() => replay("reset")} className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs ring-1 ring-zinc-700">
-            Reset
-          </button>
-          {[0.5, 1, 2, 4].map((s) => (
+        <div className="mb-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs uppercase tracking-wide text-zinc-500">Replay</span>
             <button
-              key={s}
-              onClick={() => replay("speed", s)}
-              className={`rounded-md px-3 py-1.5 text-xs ring-1 ${
-                Number(live?.control?.speed) === s ? "bg-emerald-700 ring-emerald-500" : "bg-zinc-900 ring-zinc-700"
-              }`}
+              onClick={() => replay("start")}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs ring-1 ring-zinc-700"
             >
-              {s}x
+              Start
             </button>
-          ))}
+            <button
+              onClick={() => replay("pause")}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs ring-1 ring-zinc-700"
+            >
+              Pause
+            </button>
+            <button
+              onClick={() => replay("reset")}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs ring-1 ring-zinc-700"
+            >
+              Reset
+            </button>
+            {[0.5, 1, 2, 4].map((s) => (
+              <button
+                key={s}
+                onClick={() => replay("speed", s)}
+                className={`rounded-md px-3 py-1.5 text-xs ring-1 ${
+                  Number(live?.control?.speed) === s
+                    ? "bg-emerald-700 ring-emerald-500"
+                    : "bg-zinc-900 ring-zinc-700"
+                }`}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
+          <ReplayHealth progress={replayProgress} />
+          {replayRunId && (
+            <p className="mt-1 text-[10px] font-mono text-zinc-600">replay runId: {replayRunId}</p>
+          )}
         </div>
 
         <div className="mb-4 flex flex-wrap gap-2">

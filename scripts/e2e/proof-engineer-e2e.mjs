@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-const envPath = resolve("c:/AI/Projects/Clickhouse/plantos/.env");
+const envPath = resolve(process.cwd(), ".env");
 for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
   const m = line.match(/^([^#=]+)=(.*)$/);
   if (!m) continue;

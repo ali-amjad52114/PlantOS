@@ -24,7 +24,7 @@ One authoritative replay writer, current SDK imports, Deterministic/HTTP path no
 6. Do **not** expand roles, pages, or dependencies.
 
 ## Measure of success (DoD)
-- [x] No `from "@trigger.dev/sdk/v3"` under `plantos/src/trigger/`
+- [x] No `from "@trigger.dev/sdk/v3"` under `src/trigger/`
 - [x] `page.tsx` polls live status only; no interval calling replay `tick`
 - [x] `plant-replay-tick` uses `@trigger.dev/sdk` + `queue: { concurrencyLimit: 1 }`
 - [x] Re-entrant `tickReplay` skips `original_ts` already present as live

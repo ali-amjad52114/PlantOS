@@ -40,6 +40,8 @@ export function PlantChat({
     task: "plantos-agent",
     accessToken: ({ chatId }) => mintChatAccessToken(chatId),
     startSession: ({ chatId, clientData }) => startChatSession({ chatId, clientData }),
+    // Phase 4a: typed role — not a [role=…] message prefix
+    clientData: { role },
   });
 
   const { messages, sendMessage, stop, status, error } = useChat({
@@ -71,7 +73,7 @@ export function PlantChat({
   function submit(text: string) {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
-    sendMessage({ text: `[role=${role}] ${trimmed}` });
+    sendMessage({ text: trimmed });
     setInput("");
   }
 
@@ -80,7 +82,10 @@ export function PlantChat({
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/40">
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
-        <span>Trigger.dev chat.agent · plantos-agent</span>
+        <span>
+          Trigger.dev chat.agent · clientData.role=
+          <span className="text-emerald-400/90">{role}</span>
+        </span>
         <span className="uppercase tracking-wide">{status}</span>
       </div>
 
@@ -154,8 +159,21 @@ function deriveAgentStreamProgress(
   const textParts = parts.filter((p) => p.type === "text" && String(p.text || "").trim());
   const stepParts = parts.filter((p) => p.type === "data-investigation-step");
   const towerParts = parts.filter((p) => p.type === "data-plant-tower");
+  const auditParts = parts.filter((p) => p.type === "data-turn-audit");
   const latestStep = stepParts[stepParts.length - 1] as
     | { data?: { label?: string; status?: string } }
+    | undefined;
+  const latestAudit = auditParts[auditParts.length - 1] as
+    | {
+        data?: {
+          status?: string;
+          role?: string;
+          turn?: number;
+          elapsedMs?: number;
+          towerDeck?: number;
+          toolNames?: string[];
+        };
+      }
     | undefined;
   const hasTower = towerParts.length > 0;
 
@@ -172,6 +190,10 @@ function deriveAgentStreamProgress(
   if (status === "submitted" && !inv && !viz) {
     percentage = 12;
     label = "Thinking…";
+  }
+  if (latestAudit?.data?.status === "started" && latestAudit.data.role) {
+    percentage = 18;
+    label = `Turn ${latestAudit.data.turn ?? 0} · ${latestAudit.data.role} tools ready`;
   }
   if (latestStep?.data?.status === "running" && latestStep.data.label) {
     percentage = 30;
@@ -207,6 +229,11 @@ function deriveAgentStreamProgress(
   if (textActive) {
     percentage = Math.max(percentage, 94);
     label = "Writing takeaway…";
+  }
+  if (latestAudit?.data?.status === "complete") {
+    percentage = Math.max(percentage, 96);
+    const a = latestAudit.data;
+    label = `Turn ${a.turn ?? 0} · ${a.role ?? "?"} · deck ${a.towerDeck ?? "—"} · ${a.elapsedMs ?? "?"}ms`;
   }
 
   const steps = [
