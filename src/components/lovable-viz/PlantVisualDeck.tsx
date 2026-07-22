@@ -931,7 +931,6 @@ function OEEBig() {
 /* ---------- hydro / generation visuals (Replit wind pack → HAI tags) ---------- */
 
 function WindTurbine() {
-  const live = useLiveNumber(12.4, 0.02, 1600);
   return (
     <div className="relative grid h-full w-full place-items-center overflow-hidden">
       <svg viewBox="0 0 200 200" className="h-full w-full">
@@ -958,10 +957,6 @@ function WindTurbine() {
         </g>
         <circle cx="100" cy="79" r="4" fill={CH1} style={{ filter: `drop-shadow(0 0 6px ${CH1})` }} />
       </svg>
-      <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-center">
-        <div className="font-mono text-lg font-bold tabular" style={{ color: CH1 }}>{live.toFixed(1)} MW</div>
-        <div className="text-[9px] uppercase tracking-widest text-muted-foreground">P4_HT_PO · hydro</div>
-      </div>
     </div>
   );
 }
@@ -1004,35 +999,62 @@ function HalfGauge() {
   const live = useLiveNumber(64.6, 0.01, 1800);
   const n = useCountUp(live, 800);
   const pct = Math.min(1, n / 100);
-  const r = 44;
+  const r = 40;
   const c = Math.PI * r;
+  // Needle stays in the arc; value lives below so it never collides.
+  const needleLen = 26;
   return (
-    <div className="relative grid h-full w-full place-items-center">
-      <svg viewBox="0 0 120 78" className="h-full w-full">
+    <div className="flex h-full w-full flex-col items-center justify-center gap-0.5">
+      <svg viewBox="0 0 120 72" className="h-[68%] w-full shrink-0">
         <defs>
           <linearGradient id="hg" x1="0" x2="1">
             <stop offset="0%" stopColor={CH2} />
             <stop offset="100%" stopColor={CH1} />
           </linearGradient>
         </defs>
-        <path d={`M 16 60 A ${r} ${r} 0 0 1 104 60`} stroke="var(--muted)" strokeWidth="8" fill="none" strokeLinecap="round" />
         <path
-          d={`M 16 60 A ${r} ${r} 0 0 1 104 60`}
+          d={`M 20 58 A ${r} ${r} 0 0 1 100 58`}
+          stroke="var(--muted)"
+          strokeWidth="8"
+          fill="none"
+          strokeLinecap="round"
+        />
+        <path
+          d={`M 20 58 A ${r} ${r} 0 0 1 100 58`}
           stroke="url(#hg)"
           strokeWidth="8"
           fill="none"
           strokeLinecap="round"
           strokeDasharray={`${pct * c} ${c}`}
-          style={{ filter: `drop-shadow(0 0 6px ${CH1})`, transition: "stroke-dasharray 1.4s cubic-bezier(0.2,0.7,0.2,1)" }}
+          style={{
+            filter: `drop-shadow(0 0 6px ${CH1})`,
+            transition: "stroke-dasharray 1.4s cubic-bezier(0.2,0.7,0.2,1)",
+          }}
         />
-        <g style={{ transformOrigin: "60px 60px", transform: `rotate(${-90 + pct * 180}deg)`, transition: "transform 1.4s cubic-bezier(0.2,0.7,0.2,1)" }}>
-          <line x1="60" y1="60" x2="60" y2="22" stroke="var(--foreground)" strokeWidth="2" strokeLinecap="round" />
-          <circle cx="60" cy="60" r="4" fill="var(--foreground)" />
+        <g
+          style={{
+            transformOrigin: "60px 58px",
+            transform: `rotate(${-90 + pct * 180}deg)`,
+            transition: "transform 1.4s cubic-bezier(0.2,0.7,0.2,1)",
+          }}
+        >
+          <line
+            x1="60"
+            y1="58"
+            x2="60"
+            y2={58 - needleLen}
+            stroke="var(--foreground)"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+          <circle cx="60" cy="58" r="3.5" fill="var(--foreground)" />
         </g>
       </svg>
-      <div className="absolute bottom-0 text-center">
-        <div className="font-mono text-2xl font-bold tabular" style={{ color: CH1 }}>{n.toFixed(1)}</div>
-        <div className="text-[9px] uppercase tracking-widest text-muted-foreground">MW · P4_ST_PO</div>
+      <div className="shrink-0 text-center leading-none">
+        <div className="font-mono text-base font-bold tabular" style={{ color: CH1 }}>
+          {n.toFixed(1)}
+        </div>
+        <div className="text-[8px] uppercase tracking-widest text-muted-foreground">MW</div>
       </div>
     </div>
   );
@@ -1384,9 +1406,9 @@ export const DECKS: { name: string; tag: string; roleHint: string; cards: Card[]
       { id: "HydroEnergyBars", label: "Steam · hydro MW", hint: "P4_ST_PO bars · P4_HT_PO line", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH2} 12%, var(--surface)), var(--surface))`, render: () => <WindEnergyBars /> },
       { id: "ComponentTemps", label: "Component temps", hint: "Bearing · ambient · rotor · stator", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH1} 10%, var(--surface)), var(--surface))`, render: () => <TempChips /> },
       { id: "PowerAndTarget", label: "Power · target", hint: "P4_ST_PO vs shift target", bg: `linear-gradient(135deg, color-mix(in oklab, var(--success) 12%, var(--surface)), var(--surface))`, render: () => (
-        <div className="grid h-full grid-cols-[130px_1fr] items-center gap-3">
-          <div className="h-24"><HalfGauge /></div>
-          <div className="min-w-0"><TargetProgress /></div>
+        <div className="grid h-full grid-cols-[108px_1fr] items-stretch gap-2">
+          <div className="min-h-0 overflow-hidden"><HalfGauge /></div>
+          <div className="min-w-0 min-h-0"><TargetProgress /></div>
         </div>
       ) },
     ],

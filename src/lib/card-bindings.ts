@@ -279,18 +279,29 @@ export function bindCardType(type: string, snaps: SnapshotBundle): CardBinding {
     }
     case "ComponentTemps": {
       const latest = eng.latest || [];
-      const pick = (tag: string) =>
-        Number(latest.find((r: NonNullable<EngSnap["latest"]>[number]) => r.tag === tag)?.value ?? 0);
+      const pick = (tag: string) => {
+        const v = Number(
+          latest.find((r: NonNullable<EngSnap["latest"]>[number]) => r.tag === tag)?.value ?? NaN
+        );
+        return Number.isFinite(v) ? v : null;
+      };
+      // Prefer real temp tags; never promote vibration/raw vib into °C.
       const stator = pick("P4_ST_TT01");
-      const bearing = pick("P2_VT01e") || pick("P2_TIT01") || Number(eng.attention?.[0]?.value ?? 0);
+      const boilerT = pick("P1_TIT01") ?? pick("P1_TIT02");
+      const temp =
+        stator != null && stator > 0 && stator < 500
+          ? stator
+          : boilerT != null && boilerT > 0 && boilerT < 500
+            ? boilerT
+            : null;
       return {
         kind: "list",
-        primary: stator || bearing,
-        unit: "°C",
-        caption: "Component temps from live tags",
+        primary: temp ?? rpm,
+        unit: temp != null ? "°C" : "rpm",
+        caption: temp != null ? "Stator / boiler temp · live" : "Turbine rpm · live (no temp tag)",
         items: [
-          { label: "Stator", value: stator, unit: "°C" },
-          { label: "Bearing vib proxy", value: bearing, unit: "" },
+          { label: "Stator", value: stator ?? 0, unit: "°C" },
+          { label: "Boiler TIT", value: boilerT ?? 0, unit: "°C" },
           { label: "Boiler press", value: pressure, unit: "" },
           { label: "Turbine rpm", value: rpm, unit: "rpm" },
         ],
