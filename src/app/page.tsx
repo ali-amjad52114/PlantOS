@@ -437,33 +437,49 @@ export default function PlantOSPage() {
   const onStreamProgress = useCallback((progress: PopulateProgress | null) => {
     if (!awaitingBindRef.current) return;
     if (!progress) return;
-    setStageProgress({
-      percentage: Math.min(88, progress.percentage),
-      label: progress.label,
-      steps: [
-        {
-          id: "trigger",
-          label: "Trigger",
-          done: progress.percentage >= 18,
-          active: progress.percentage < 18,
-        },
-        {
-          id: "investigate",
-          label: "Investigate",
-          done: progress.percentage >= 55,
-          active: progress.percentage >= 18 && progress.percentage < 55,
-        },
-        {
-          id: "bind",
-          label: "Bind CH",
-          done: false,
-          active: progress.percentage >= 55,
-        },
-        { id: "ready", label: "Ready", done: false, active: false },
-      ],
+    const percentage = Math.min(88, progress.percentage);
+    const label = progress.label;
+    const steps: PopulateProgress["steps"] = [
+      {
+        id: "trigger",
+        label: "Trigger",
+        done: percentage >= 18,
+        active: percentage < 18,
+      },
+      {
+        id: "investigate",
+        label: "Investigate",
+        done: percentage >= 55,
+        active: percentage >= 18 && percentage < 55,
+      },
+      {
+        id: "bind",
+        label: "Bind CH",
+        done: false,
+        active: percentage >= 55,
+      },
+      { id: "ready", label: "Ready", done: false, active: false },
+    ];
+    setStageProgress((prev) => {
+      if (
+        prev &&
+        prev.percentage === percentage &&
+        prev.label === label &&
+        prev.steps.length === steps.length &&
+        prev.steps.every(
+          (s, i) =>
+            s.id === steps[i].id &&
+            s.done === steps[i].done &&
+            s.active === steps[i].active
+        )
+      ) {
+        return prev;
+      }
+      return { percentage, label, steps };
     });
   }, []);
 
+  const revealInFlight = useRef(false);
   const onAgentBusyChange = useCallback(
     (busy: boolean, chatMode: string) => {
       const pending = awaitingBindRef.current;
@@ -473,8 +489,11 @@ export default function PlantOSPage() {
         return;
       }
       // Only reveal after this ask actually ran on Trigger (busy flipped true → false).
-      if (pending.sawBusy) {
-        void revealBoundTower();
+      if (pending.sawBusy && !revealInFlight.current) {
+        revealInFlight.current = true;
+        void revealBoundTower().finally(() => {
+          revealInFlight.current = false;
+        });
       }
     },
     [revealBoundTower]

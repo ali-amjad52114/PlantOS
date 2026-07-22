@@ -249,14 +249,25 @@ function ChatSession({
   }, [pendingQuestion, busy]);
 
   const streamProgress = deriveAgentStreamProgress(messages, status);
+  const streamProgressKey = streamProgress
+    ? `${streamProgress.percentage}|${streamProgress.label}|${streamProgress.steps
+        .map((s) => `${s.id}:${s.done ? 1 : 0}${s.active ? 1 : 0}`)
+        .join(",")}`
+    : "";
+  const lastStreamKey = useRef<string>("");
+  const lastBusy = useRef<boolean | null>(null);
 
   useEffect(() => {
+    if (lastBusy.current === busy) return;
+    lastBusy.current = busy;
     onAgentBusyChange?.(busy, mode);
   }, [busy, mode, onAgentBusyChange]);
 
   useEffect(() => {
+    if (lastStreamKey.current === streamProgressKey) return;
+    lastStreamKey.current = streamProgressKey;
     onStreamProgress?.(streamProgress);
-  }, [streamProgress, onStreamProgress]);
+  }, [streamProgressKey, streamProgress, onStreamProgress]);
 
   function startNewChat() {
     const id = newChatId();
