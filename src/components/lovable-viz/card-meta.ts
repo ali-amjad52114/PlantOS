@@ -1,4 +1,6 @@
 /** Flat catalog of Lovable→PlantOS cards. Question wiring comes later. */
+import { REPLIT_DECKS } from "./replit-visuals";
+
 export type LovableCardMeta = {
   type: string;
   label: string;
@@ -9,7 +11,7 @@ export type LovableCardMeta = {
   description: string;
 };
 
-export const LOVABLE_CARD_META: LovableCardMeta[] = [
+const BASE_LOVABLE_CARD_META: LovableCardMeta[] = [
   // Deck 1 — Energy value (finance)
   { type: "EnergyValueTrend", label: "Shift energy value", hint: "$ from P4_ST_PO × price", deck: 1, deckName: "Energy value", roleHint: "finance", description: "Live $ energy value with mini trend. Finance." },
   { type: "PowerSourceMix", label: "Steam vs hydro mix", hint: "ST_PO vs HT_PO share", deck: 1, deckName: "Energy value", roleHint: "finance", description: "Donut mix of steam vs hydro power share. Finance." },
@@ -70,6 +72,23 @@ export const LOVABLE_CARD_META: LovableCardMeta[] = [
   { type: "PlantValueMap", label: "Plant value map", hint: "Density by area", deck: 12, deckName: "Value by area", roleHint: "finance", description: "Heat-blob plant value map. Finance." },
   { type: "FinanceFunnelDetail", label: "Value funnel detail", hint: "Booked · on target · at risk", deck: 12, deckName: "Value by area", roleHint: "finance", description: "Finance KPIs + river stream. Finance." },
   { type: "ForecastTrajectory", label: "Forecast trajectory", hint: "Actual vs plan S-curve", deck: 12, deckName: "Value by area", roleHint: "finance", description: "S-curve actual vs plan forecast. Finance." },
+];
+
+const REPLIT_CARD_META: LovableCardMeta[] = REPLIT_DECKS.flatMap((deck, deckIndex) =>
+  deck.cards.map((card) => ({
+    type: card.id,
+    label: card.label,
+    hint: card.hint,
+    deck: 13 + deckIndex,
+    deckName: deck.name,
+    roleHint: deck.roleHint,
+    description: `${card.label}. ${deck.roleHint} Replit-derived visual with PlantOS-worded seed data.`,
+  }))
+);
+
+export const LOVABLE_CARD_META: LovableCardMeta[] = [
+  ...BASE_LOVABLE_CARD_META,
+  ...REPLIT_CARD_META,
 ];
 
 export const LOVABLE_CARD_TYPES = LOVABLE_CARD_META.map((c) => c.type);

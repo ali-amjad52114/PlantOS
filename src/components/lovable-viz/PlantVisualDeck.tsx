@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { REPLIT_DECKS } from "./replit-visuals";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import {
   Area,
@@ -1405,6 +1406,7 @@ export const DECKS: { name: string; tag: string; roleHint: string; cards: Card[]
       { id: "ForecastTrajectory", label: "Forecast trajectory", hint: "Actual vs plan S-curve", bg: `linear-gradient(135deg, color-mix(in oklab, var(--success) 10%, var(--surface)), var(--surface))`, render: () => <SCurveTrend /> },
     ],
   },
+  ...REPLIT_DECKS,
 ];
 
 function BorrowerKPIs() {

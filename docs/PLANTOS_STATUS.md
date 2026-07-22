@@ -1,6 +1,6 @@
 # PlantOS Status Board
 
-**Last update:** Track C routing + parallel (building-effective-agents)
+**Last update:** Replit ALL visuals catalog port
 
 ## Runtime identity
 - Checkout: `c:\AI\Projects\Clickhouse` (app at **repo root**)
@@ -114,6 +114,22 @@ One plant. One truth. Different intelligence for every role.
 | 4, 7, 8, 10, 11 | engineer | GeneratorOutput, TurbineSpeed, VibrationSpectrum |
 
 **See:** Pre-built → “Lovable decks” · `src/components/lovable-viz/`
+
+## Replit ALL visuals
+
+**Status:** **PASS** — props-only catalog expansion; no runtime, Trigger, replay, or page changes.
+
+| Package | Decks | Cards | Result |
+|---------|-------|------:|--------|
+| Equipment faceplates | 13–17 | 20 | **PASS** |
+| Operations sets | 18–21 | 24 | **PASS** |
+| Generation rotor pack | 22–23 | 8 | **PASS** |
+| Role response + idle | 24–26 | 10 | **PASS** |
+| Total new | 13–26 | 62 | **PASS** |
+
+PlantOS/HAI wording replaces manufacturing and wind marketing language. Seed previews are intentionally not live-bound to ClickHouse. `tsc --noEmit` is clean.
+
+**See:** `lessons/PLAN_REPLIT_ALL_VISUALS.md` · Pre-built → “PlantOS visual decks”.
 
 ## Plant viz cards (Ignition-inspired)
 

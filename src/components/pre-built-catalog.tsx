@@ -556,7 +556,7 @@ export function PreBuiltCatalog() {
       <div>
         <h2 className="text-xl font-semibold tracking-tight">Pre-built visualization catalog</h2>
         <p className="mt-1 max-w-3xl text-sm text-zinc-400">
-          Full <code className="text-zinc-300">@json-render/shadcn</code> set + PlantOS charts + Lovable PlantOS cards.
+          Full <code className="text-zinc-300">@json-render/shadcn</code> set + PlantOS charts + Lovable and Replit-derived PlantOS cards.
           Ask-agent can assemble these via <code className="text-zinc-300">renderVisualization</code>. Sample data only —
           question→card wiring comes later.
         </p>
@@ -579,11 +579,12 @@ export function PreBuiltCatalog() {
 
       <div>
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-emerald-400">
-          Lovable decks (PlantOS wording · 12 × 4 cards)
+          PlantOS visual decks (Lovable 1–12 + Replit-derived 13–26)
         </h3>
         <p className="mb-4 max-w-3xl text-xs text-zinc-500">
-          All cards are in the catalog above. Browse decks here; you will assign which cards pair with which demo
-          questions later.
+          Decks 1–12 preserve the original Lovable set. Decks 13–17 contain equipment faceplates, 18–21 the
+          operations sets, 22–23 the generation rotor pack, and 24–26 role response and idle visuals. All use
+          props-only seed data; question mapping and live ClickHouse bindings remain separate work.
         </p>
         <div className="rounded-lg border border-emerald-900/40 bg-zinc-900/20 p-4">
           <PlantVisualDeck />
