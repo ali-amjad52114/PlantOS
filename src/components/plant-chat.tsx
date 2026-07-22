@@ -3,25 +3,28 @@
 import { useChat } from "@ai-sdk/react";
 import { useTriggerChatTransport } from "@trigger.dev/sdk/chat/react";
 import type { UIMessage } from "ai";
-import { Loader2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Loader2, MessageSquarePlus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { mintChatAccessToken, startChatSession } from "@/app/actions";
 import { FinanceBars, SparkTrend, TargetBars } from "@/components/charts";
 import { PlantTowerGrid } from "@/components/plant-tower-grid";
 import { Visualization } from "@/components/visualization";
+import {
+  newChatId,
+  removeChatSession,
+  resolveChatIdForMode,
+  sessionsForMode,
+  setActiveChatId,
+  upsertChatSession,
+  type StoredChat,
+} from "@/lib/chat-sessions";
 import { normalizeSpec } from "@/lib/catalog";
 import type { PlantTowerPayload } from "@/lib/plant-tower";
 import type { plantAgent } from "@/trigger/plant-agent";
 
 type Role = "engineer" | "operations" | "finance";
-
-const SUGGESTED: Record<Role, string> = {
-  engineer: "What is the current status of the generators and turbine?",
-  operations: "Are we meeting today's production target? What is the bottleneck?",
-  finance: "What is today's production worth, and what has it cost?",
-};
 
 const TOOL_TO_ROLE: Record<string, Role> = {
   "tool-investigateEngineer": "engineer",
@@ -29,44 +32,160 @@ const TOOL_TO_ROLE: Record<string, Role> = {
   "tool-investigateFinance": "finance",
 };
 
+export type PopulateProgress = {
+  percentage: number;
+  label: string;
+  steps: Array<{ id: string; label: string; done: boolean; active: boolean }>;
+};
+
 export function PlantChat({
   role,
+  mode,
   onToolVisual,
   onTower,
   hideTowersInChat = false,
   shell = false,
-  suggestedOverride,
+  suggestedQuestions,
+  populateProgress = null,
+  pendingQuestion = null,
+  onPendingQuestionConsumed,
+  askBridgeRef,
+  onStarterQuestion,
+  onStreamProgress,
+  onAgentBusyChange,
 }: {
   role: Role;
+  /** Persona this chat pane belongs to — sessions are filtered by this. */
+  mode: string;
   onToolVisual: (role: Role, payload: any) => void;
   onTower?: (tower: PlantTowerPayload) => void;
   hideTowersInChat?: boolean;
   shell?: boolean;
-  suggestedOverride?: string;
+  suggestedQuestions: [string, string, string];
+  populateProgress?: PopulateProgress | null;
+  pendingQuestion?: string | null;
+  onPendingQuestionConsumed?: () => void;
+  askBridgeRef?: MutableRefObject<((q: string) => void) | null>;
+  /** Prefer over local submit for mapped starter chips (CH bind + narrative). */
+  onStarterQuestion?: (question: string) => void;
+  /** Bubble Trigger stream progress to the visual stage (right). */
+  onStreamProgress?: (progress: PopulateProgress | null) => void;
+  onAgentBusyChange?: (busy: boolean, chatMode: string) => void;
+}) {
+  const [sessions, setSessions] = useState<StoredChat[]>([]);
+  const [chatId, setChatId] = useState(() => newChatId());
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    const resolved = resolveChatIdForMode(mode);
+    setSessions(resolved.sessions);
+    setChatId(resolved.chatId);
+    setHydrated(true);
+  }, [mode]);
+
+  function selectChat(id: string) {
+    setActiveChatId(mode, id);
+    setChatId(id);
+  }
+
+  function refreshSessions() {
+    setSessions(sessionsForMode(mode));
+  }
+
+  if (!hydrated) {
+    return (
+      <div className="card-surface flex h-full min-h-0 flex-col items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        Loading {mode} chats…
+      </div>
+    );
+  }
+
+  return (
+    <ChatSession
+      key={`${mode}:${chatId}`}
+      chatId={chatId}
+      role={role}
+      mode={mode}
+      sessions={sessions}
+      refreshSessions={refreshSessions}
+      onSelectChat={selectChat}
+      onToolVisual={onToolVisual}
+      onTower={onTower}
+      hideTowersInChat={hideTowersInChat}
+      shell={shell}
+      suggestedQuestions={suggestedQuestions}
+      populateProgress={populateProgress}
+      pendingQuestion={pendingQuestion}
+      onPendingQuestionConsumed={onPendingQuestionConsumed}
+      askBridgeRef={askBridgeRef}
+      onStarterQuestion={onStarterQuestion}
+      onStreamProgress={onStreamProgress}
+      onAgentBusyChange={onAgentBusyChange}
+    />
+  );
+}
+
+function ChatSession({
+  chatId,
+  role,
+  mode,
+  sessions,
+  refreshSessions,
+  onSelectChat,
+  onToolVisual,
+  onTower,
+  hideTowersInChat,
+  shell,
+  suggestedQuestions,
+  populateProgress,
+  pendingQuestion,
+  onPendingQuestionConsumed,
+  askBridgeRef,
+  onStarterQuestion,
+  onStreamProgress,
+  onAgentBusyChange,
+}: {
+  chatId: string;
+  role: Role;
+  mode: string;
+  sessions: StoredChat[];
+  refreshSessions: () => void;
+  onSelectChat: (id: string) => void;
+  onToolVisual: (role: Role, payload: any) => void;
+  onTower?: (tower: PlantTowerPayload) => void;
+  hideTowersInChat?: boolean;
+  shell?: boolean;
+  suggestedQuestions: [string, string, string];
+  populateProgress?: PopulateProgress | null;
+  pendingQuestion?: string | null;
+  onPendingQuestionConsumed?: () => void;
+  askBridgeRef?: MutableRefObject<((q: string) => void) | null>;
+  onStarterQuestion?: (question: string) => void;
+  onStreamProgress?: (progress: PopulateProgress | null) => void;
+  onAgentBusyChange?: (busy: boolean, chatMode: string) => void;
 }) {
   const transport = useTriggerChatTransport<typeof plantAgent>({
     task: "plantos-agent",
-    accessToken: ({ chatId }) => mintChatAccessToken(chatId),
-    startSession: ({ chatId, clientData }) => startChatSession({ chatId, clientData }),
-    // Phase 4a: typed role — not a [role=…] message prefix
+    accessToken: ({ chatId: id }) => mintChatAccessToken(id),
+    startSession: ({ chatId: id, clientData }) => startChatSession({ chatId: id, clientData }),
     clientData: { role },
   });
 
   const { messages, sendMessage, stop, status, error } = useChat({
+    id: chatId,
     transport: transport as any,
   });
   const [input, setInput] = useState("");
   const busy = status === "submitted" || status === "streaming";
-  const suggested = suggestedOverride ?? SUGGESTED[role];
 
-  // Guard: useChat can return a new `messages` reference every render while streaming.
-  // Calling onToolVisual → parent setState without dedupe caused max update depth.
   const onToolVisualRef = useRef(onToolVisual);
   onToolVisualRef.current = onToolVisual;
   const onTowerRef = useRef(onTower);
   onTowerRef.current = onTower;
   const pushedToolOutputs = useRef(new Set<string>());
   const pushedTowers = useRef(new Set<string>());
+  const pendingHandled = useRef<string | null>(null);
 
   useEffect(() => {
     for (const m of messages) {
@@ -91,116 +210,272 @@ export function PlantChat({
     }
   }, [messages]);
 
+  function rememberSession(title: string) {
+    upsertChatSession({
+      id: chatId,
+      title: title.slice(0, 72),
+      mode,
+      role,
+      updatedAt: Date.now(),
+    });
+    refreshSessions();
+  }
+
   function submit(text: string) {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
+    rememberSession(trimmed);
     sendMessage({ text: trimmed });
     setInput("");
   }
 
+  useEffect(() => {
+    if (askBridgeRef) askBridgeRef.current = submit;
+    return () => {
+      if (askBridgeRef) askBridgeRef.current = null;
+    };
+  });
+
+  useEffect(() => {
+    if (!pendingQuestion) {
+      pendingHandled.current = null;
+      return;
+    }
+    if (pendingHandled.current === pendingQuestion) return;
+    if (busy) return;
+    pendingHandled.current = pendingQuestion;
+    submit(pendingQuestion);
+    onPendingQuestionConsumed?.();
+  }, [pendingQuestion, busy]);
+
   const streamProgress = deriveAgentStreamProgress(messages, status);
+
+  useEffect(() => {
+    onAgentBusyChange?.(busy, mode);
+  }, [busy, mode, onAgentBusyChange]);
+
+  useEffect(() => {
+    onStreamProgress?.(streamProgress);
+  }, [streamProgress, onStreamProgress]);
+
+  function startNewChat() {
+    const id = newChatId();
+    upsertChatSession({
+      id,
+      title: "New chat",
+      mode,
+      role,
+      updatedAt: Date.now(),
+    });
+    refreshSessions();
+    onSelectChat(id);
+  }
+
+  function deleteChat(id: string) {
+    removeChatSession(id);
+    const remaining = sessionsForMode(mode);
+    refreshSessions();
+    if (id === chatId) {
+      if (remaining[0]) onSelectChat(remaining[0].id);
+      else onSelectChat(newChatId());
+    }
+  }
 
   return (
     <div
       className={
         shell
           ? "card-surface flex h-full min-h-0 flex-col overflow-hidden"
-          : "rounded-lg border border-zinc-800 bg-zinc-900/40"
+          : "rounded-lg border border-border bg-surface"
       }
     >
-      <div
-        className={`flex items-center justify-between px-4 py-3 text-xs ${
-          shell ? "border-b border-white/5 text-muted-foreground" : "border-b border-zinc-800 text-zinc-400"
-        }`}
-      >
-        <span>
-          {shell ? (
-            <>
-              Ask agent · <span className="text-emerald-400/90 capitalize">{role}</span>
-            </>
-          ) : (
-            <>
-              Trigger.dev chat.agent · clientData.role=
-              <span className="text-emerald-400/90">{role}</span>
-            </>
+      <div className="flex min-h-0 flex-1">
+        <aside className="flex w-[132px] shrink-0 flex-col border-r border-border bg-surface-2/70 sm:w-[148px]">
+          <div className="border-b border-border px-2 py-2">
+            <button
+              type="button"
+              onClick={startNewChat}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-2 py-2 text-[11px] font-medium text-primary-foreground"
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5" />
+              New chat
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-1.5">
+            {sessions.length === 0 && (
+              <p className="px-1 py-2 text-[11px] text-muted-foreground">
+                No {mode} chats yet
+              </p>
+            )}
+            {sessions.map((s) => {
+              const active = s.id === chatId;
+              return (
+                <div
+                  key={s.id}
+                  className={`group flex items-start gap-1 rounded-lg border px-1.5 py-1.5 ${
+                    active
+                      ? "border-primary/35 bg-primary/10"
+                      : "border-transparent hover:border-border hover:bg-surface"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSelectChat(s.id)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="truncate text-[11px] font-medium leading-tight">{s.title}</div>
+                    <div className="mt-0.5 truncate text-[10px] capitalize text-muted-foreground">
+                      {s.mode}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteChat(s.id)}
+                    className="rounded p-0.5 text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-danger"
+                    aria-label="Delete chat"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3 text-xs text-muted-foreground">
+            <span>
+              Ask agent ·{" "}
+              <span className="capitalize text-primary">
+                {mode}
+              </span>
+            </span>
+            <span className="uppercase tracking-wide">{status}</span>
+          </div>
+
+          {populateProgress && (
+            <ChatProgressBar progress={populateProgress} tone="populate" />
           )}
-        </span>
-        <span className="uppercase tracking-wide">{status}</span>
-      </div>
+          {streamProgress && <ChatProgressBar progress={streamProgress} tone="ask" />}
 
-      {streamProgress && <AgentStreamProgress progress={streamProgress} shell={shell} />}
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 text-sm">
+            {messages.length === 0 && (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {mode[0].toUpperCase() + mode.slice(1)} chats only. Pick a starter to populate this
+                  persona&apos;s stage — switching tabs restores prior visuals if this persona already
+                  answered.
+                </p>
+                <div className="grid gap-2">
+                  {suggestedQuestions.map((q, i) => (
+                    <button
+                      key={q}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => (onStarterQuestion ? onStarterQuestion(q) : submit(q))}
+                      className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-left text-sm transition hover:border-primary/40 hover:bg-primary/5 disabled:opacity-50"
+                    >
+                      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-primary">
+                        Question {i + 1}
+                      </span>
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {messages.map((m) => (
+              <Message key={m.id} message={m} hideTowers={hideTowersInChat} />
+            ))}
+            {error && <p className="text-xs text-danger">Agent error: {error.message}</p>}
+          </div>
 
-      <div
-        className={`min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 text-sm ${
-          shell ? "" : "max-h-96"
-        }`}
-      >
-        {messages.length === 0 && (
-          <p className={shell ? "text-muted-foreground" : "text-zinc-500"}>
-            {shell
-              ? `Suggested: ${suggested}`
-              : `Ask via Trigger agent (OPEN_AI in dashboard). Suggested: ${suggested}`}
-          </p>
-        )}
-        {messages.map((m) => (
-          <Message key={m.id} message={m} hideTowers={hideTowersInChat} />
-        ))}
-        {error && <p className="text-xs text-red-400">Agent error: {error.message}</p>}
-      </div>
-
-      <form
-        className={`flex gap-2 p-3 ${shell ? "border-t border-white/5" : "border-t border-zinc-800"}`}
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit(input || suggested);
-        }}
-      >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={suggested}
-          className={
-            shell
-              ? "flex-1 rounded-full border border-white/10 bg-black/30 px-4 py-2.5 text-sm outline-none focus:border-emerald-500/40"
-              : "flex-1 rounded-md bg-zinc-950 px-3 py-2 text-sm ring-1 ring-zinc-700 outline-none focus:ring-emerald-600"
-          }
-        />
-        {busy ? (
-          <button
-            type="button"
-            onClick={() => stop()}
-            className={
-              shell
-                ? "rounded-full bg-white/10 px-4 py-2 text-sm"
-                : "rounded-md bg-zinc-700 px-3 py-2 text-sm"
-            }
+          <form
+            className="flex gap-2 border-t border-border p-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit(input || suggestedQuestions[0]);
+            }}
           >
-            Stop
-          </button>
-        ) : (
-          <button
-            type="submit"
-            className={
-              shell
-                ? "rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-primary-foreground"
-                : "rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white"
-            }
-          >
-            Ask
-          </button>
-        )}
-      </form>
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={suggestedQuestions[0]}
+              className="flex-1 rounded-full border border-border bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+            />
+            {busy ? (
+              <button
+                type="button"
+                onClick={() => stop()}
+                className="rounded-full bg-muted px-4 py-2 text-sm"
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                type="submit"
+                className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+              >
+                Ask
+              </button>
+            )}
+          </form>
+        </div>
+      </div>
     </div>
   );
 }
 
-type StreamProgress = {
-  percentage: number;
-  label: string;
-  steps: Array<{ id: string; label: string; done: boolean; active: boolean }>;
-};
+function ChatProgressBar({
+  progress,
+  tone,
+}: {
+  progress: PopulateProgress;
+  tone: "populate" | "ask";
+}) {
+  const pct = Math.max(0, Math.min(100, Math.round(progress.percentage)));
+  return (
+    <div
+      className={
+        tone === "populate"
+          ? "border-b border-border bg-accent/10 px-4 py-2"
+          : "border-b border-border bg-primary/5 px-4 py-2"
+      }
+    >
+      <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+        <span className="text-foreground/90">
+          {tone === "populate" ? "Populating · " : ""}
+          {progress.label}
+        </span>
+        <span className="tabular text-muted-foreground">{pct}%</span>
+      </div>
+      <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className={`h-full transition-all duration-300 ${
+            tone === "populate" ? "bg-[color:var(--accent)]" : "bg-primary"
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+        {progress.steps.map((s) => (
+          <span
+            key={s.id}
+            className={
+              s.done ? "text-primary" : s.active ? "text-foreground/80" : "text-muted-foreground/50"
+            }
+          >
+            {s.done ? "✓ " : s.active ? "● " : "○ "}
+            {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
-/** Live checklist from streaming message parts (chat stream realtime — not useRealtimeRun). */
+type StreamProgress = PopulateProgress;
+
 function deriveAgentStreamProgress(
   messages: UIMessage[],
   status: string
@@ -311,7 +586,10 @@ function deriveAgentStreamProgress(
       id: "investigate",
       label: "Investigate",
       done: invDone || Boolean(live && live.state === "output-available") || hasTower,
-      active: invActive || (Boolean(live) && live.state !== "output-available") || latestStep?.data?.status === "running",
+      active:
+        invActive ||
+        (Boolean(live) && live.state !== "output-available") ||
+        latestStep?.data?.status === "running",
     },
     {
       id: "viz",
@@ -330,52 +608,14 @@ function deriveAgentStreamProgress(
   return { percentage, label, steps };
 }
 
-function AgentStreamProgress({
-  progress,
-  shell,
-}: {
-  progress: StreamProgress;
-  shell?: boolean;
-}) {
-  const pct = Math.max(0, Math.min(100, Math.round(progress.percentage)));
-  return (
-    <div
-      className={
-        shell
-          ? "border-b border-white/5 bg-black/20 px-4 py-2"
-          : "border-b border-zinc-800 bg-zinc-950/60 px-3 py-2"
-      }
-    >
-      <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
-        <span className={shell ? "text-foreground/90" : "text-zinc-300"}>{progress.label}</span>
-        <span className="tabular-nums text-muted-foreground">{pct}%</span>
-      </div>
-      <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${pct}%` }} />
-      </div>
-      <div className="flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-        {progress.steps.map((s) => (
-          <span
-            key={s.id}
-            className={
-              s.done ? "text-emerald-400" : s.active ? "text-foreground/80" : "text-muted-foreground/50"
-            }
-          >
-            {s.done ? "✓ " : s.active ? "● " : "○ "}
-            {s.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function Message({ message, hideTowers }: { message: UIMessage; hideTowers?: boolean }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl bg-emerald-600/90 px-3 py-2 text-sm text-primary-foreground">
-          {message.parts.map((part, i) => (part.type === "text" ? <span key={i}>{part.text}</span> : null))}
+        <div className="max-w-[85%] rounded-2xl bg-primary px-3 py-2 text-sm text-primary-foreground">
+          {message.parts.map((part, i) =>
+            part.type === "text" ? <span key={i}>{part.text}</span> : null
+          )}
         </div>
       </div>
     );
@@ -406,7 +646,7 @@ function Message({ message, hideTowers }: { message: UIMessage; hideTowers?: boo
 function MessagePart({ part }: { part: UIMessage["parts"][number] }) {
   if (part.type === "text") {
     return (
-      <div className="prose-sm max-w-none text-zinc-300">
+      <div className="prose-sm max-w-none text-foreground/85">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
       </div>
     );
@@ -423,23 +663,33 @@ function MessagePart({ part }: { part: UIMessage["parts"][number] }) {
     const input = p.input as { spec?: unknown } | undefined;
     const output = p.output as { ok?: boolean } | undefined;
     const spec = p.state === "input-streaming" ? null : normalizeSpec(input?.spec);
-    // Progress bar owns the "building" label — avoid a second spinner row here.
     if (!spec) return null;
     if (output && output.ok === false) return null;
     return <Visualization spec={spec} />;
   }
 
   if (part.type === "tool-investigateEngineer") {
-    return <ToolStatus label="Engineer investigation" spinning={(part as any).state !== "output-available"} />;
+    return (
+      <ToolStatus label="Engineer investigation" spinning={(part as any).state !== "output-available"} />
+    );
   }
   if (part.type === "tool-investigateOperations") {
-    return <ToolStatus label="Operations investigation" spinning={(part as any).state !== "output-available"} />;
+    return (
+      <ToolStatus
+        label="Operations investigation"
+        spinning={(part as any).state !== "output-available"}
+      />
+    );
   }
   if (part.type === "tool-investigateFinance") {
-    return <ToolStatus label="Finance investigation" spinning={(part as any).state !== "output-available"} />;
+    return (
+      <ToolStatus label="Finance investigation" spinning={(part as any).state !== "output-available"} />
+    );
   }
   if (part.type === "tool-getLivePlantStatus") {
-    return <ToolStatus label="Live plant status" spinning={(part as any).state !== "output-available"} />;
+    return (
+      <ToolStatus label="Live plant status" spinning={(part as any).state !== "output-available"} />
+    );
   }
   if (part.type === "tool-advanceReplay") {
     return <ToolStatus label="Advancing replay" spinning={(part as any).state !== "output-available"} />;
@@ -450,7 +700,7 @@ function MessagePart({ part }: { part: UIMessage["parts"][number] }) {
 
 function ToolStatus({ label, spinning }: { label: string; spinning?: boolean }) {
   return (
-    <div className="my-1 flex items-center gap-1.5 text-xs text-zinc-500">
+    <div className="my-1 flex items-center gap-1.5 text-xs text-muted-foreground">
       {spinning ? <Loader2 className="size-3 animate-spin" /> : <span>✓</span>}
       {label}
     </div>
@@ -465,20 +715,20 @@ export function RoleVisual({ role, data }: { role: Role; data: any }) {
         <Card title="Generator / turbine power" value={`${Number(data.productionMW).toFixed(2)} MW`} />
         <Card title="Turbine speed" value={`${Number(data.turbineSpeed).toFixed(1)} rpm`} />
         <Card title="Boiler pressure" value={`${Number(data.boilerPressure).toFixed(3)}`} />
-        <div className="md:col-span-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-          <h3 className="mb-2 text-sm font-medium text-zinc-300">P4_ST_PO trend (ClickHouse)</h3>
+        <div className="card-surface md:col-span-2 p-4">
+          <h3 className="mb-2 text-sm font-medium">P4_ST_PO trend (ClickHouse)</h3>
           <SparkTrend data={data.trends?.P4_ST_PO || []} unit="MW" />
         </div>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-          <h3 className="mb-2 text-sm font-medium text-zinc-300">Closest to limits</h3>
+        <div className="card-surface p-4">
+          <h3 className="mb-2 text-sm font-medium">Closest to limits</h3>
           <ul className="space-y-1 text-sm">
             {(data.attention || []).map((a: any) => (
-              <li key={a.tag} className={a.outside ? "text-amber-300" : "text-zinc-400"}>
+              <li key={a.tag} className={a.outside ? "text-[color:var(--warning)]" : "text-muted-foreground"}>
                 {a.label}: {Number(a.value).toFixed(2)} {a.unit}
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-xs text-zinc-500">
+          <p className="mt-2 text-xs text-muted-foreground">
             Query {data.elapsedMs} ms · {data.dataSource}
           </p>
         </div>
@@ -491,20 +741,22 @@ export function RoleVisual({ role, data }: { role: Role; data: any }) {
         <Card title="Current rate" value={`${Number(data.currentRateMW).toFixed(2)} MW`} />
         <Card title="Shift vs target" value={`${Number(data.percentOfTarget).toFixed(1)}%`} />
         <Card title="Capacity util." value={`${Number(data.capacityUtilizationPct).toFixed(1)}%`} />
-        <div className="md:col-span-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-          <h3 className="mb-2 text-sm font-medium text-zinc-300">Shift MWh vs target (synthetic clock)</h3>
+        <div className="card-surface md:col-span-2 p-4">
+          <h3 className="mb-2 text-sm font-medium">Shift MWh vs target (synthetic clock)</h3>
           <TargetBars
             current={Number(data.shiftProductionMWh)}
             target={Number(data.shiftTargetMWh)}
             projected={Number(data.projectedShiftMWh)}
           />
         </div>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm">
+        <div className="card-surface p-4 text-sm">
           <p>
-            Bottleneck: <span className="text-amber-300">{data.bottleneckArea}</span>
+            Bottleneck: <span className="text-[color:var(--warning)]">{data.bottleneckArea}</span>
           </p>
-          <p className="mt-2 text-xs text-zinc-500">{data.bottleneckRule}</p>
-          <p className="mt-2 text-xs text-zinc-500">Hours into shift (demo clock): {Number(data.hoursElapsed).toFixed(2)}</p>
+          <p className="mt-2 text-xs text-muted-foreground">{data.bottleneckRule}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Hours into shift (demo clock): {Number(data.hoursElapsed).toFixed(2)}
+          </p>
         </div>
       </section>
     );
@@ -514,8 +766,8 @@ export function RoleVisual({ role, data }: { role: Role; data: any }) {
       <Card title="Production value" value={`$${Number(data.productionValueUSD).toFixed(0)}`} />
       <Card title="Operating cost" value={`$${Number(data.operatingCostUSD).toFixed(0)}`} />
       <Card title="Margin" value={`$${Number(data.marginUSD).toFixed(0)}`} />
-      <div className="md:col-span-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <h3 className="mb-2 text-sm font-medium text-zinc-300">Finance stack (synthetic rates)</h3>
+      <div className="card-surface md:col-span-2 p-4">
+        <h3 className="mb-2 text-sm font-medium">Finance stack (synthetic rates)</h3>
         <FinanceBars
           value={Number(data.productionValueUSD)}
           cost={Number(data.operatingCostUSD)}
@@ -523,10 +775,10 @@ export function RoleVisual({ role, data }: { role: Role; data: any }) {
           planned={Number(data.plannedRevenue)}
         />
       </div>
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm">
+      <div className="card-surface p-4 text-sm">
         <p>Cost / MWh: ${Number(data.costPerMWh).toFixed(2)}</p>
         <p className="mt-1">Δ vs plan (prorated): ${Number(data.varianceVsPlanUSD).toFixed(0)}</p>
-        <p className="mt-2 text-xs text-amber-200/80">{data.disclaimer}</p>
+        <p className="mt-2 text-xs text-[color:var(--warning)]">{data.disclaimer}</p>
       </div>
     </section>
   );
@@ -536,7 +788,7 @@ function Card({ title, value }: { title: string; value: string }) {
   return (
     <div className="card-surface p-4">
       <p className="text-xs uppercase tracking-wide text-muted-foreground">{title}</p>
-      <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
+      <p className="mt-2 text-2xl font-semibold tabular">{value}</p>
     </div>
   );
 }

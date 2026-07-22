@@ -2,10 +2,26 @@ import { LOVABLE_CARD_META } from "@/components/lovable-viz/card-meta";
 
 export type PlantRole = "engineer" | "operations" | "finance";
 
+export type CardBinding = {
+  kind: "metric" | "series" | "list";
+  primary: number;
+  unit?: string;
+  caption?: string;
+  series?: Array<{ t: string; v: number }>;
+  items?: Array<{
+    label: string;
+    value: number;
+    unit?: string;
+    tone?: "ok" | "warning" | "danger" | "muted";
+  }>;
+  synthetic?: boolean;
+};
+
 export type PlantTowerCardRef = {
   type: string;
   label: string;
   hint: string;
+  binding?: CardBinding | null;
 };
 
 export type PlantTowerPayload = {
@@ -13,7 +29,12 @@ export type PlantTowerPayload = {
   deck: number;
   deckName: string;
   cards: PlantTowerCardRef[]; // exactly 4
-  source: "role-default";
+  source: "role-default" | "question-map";
+  mode?: string;
+  questionIndex?: number;
+  question?: string;
+  dataSource?: string;
+  elapsedMs?: number;
 };
 
 /** Interim defaults until question→card maps exist. */

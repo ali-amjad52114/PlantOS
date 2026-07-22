@@ -928,7 +928,7 @@ function OEEBig() {
   );
 }
 
-/* ---------- new energy / wind turbine visuals ---------- */
+/* ---------- hydro / generation visuals (Replit wind pack → HAI tags) ---------- */
 
 function WindTurbine() {
   const live = useLiveNumber(12.4, 0.02, 1600);
@@ -960,7 +960,7 @@ function WindTurbine() {
       </svg>
       <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-center">
         <div className="font-mono text-lg font-bold tabular" style={{ color: CH1 }}>{live.toFixed(1)} MW</div>
-        <div className="text-[9px] uppercase tracking-widest text-muted-foreground">hydro power</div>
+        <div className="text-[9px] uppercase tracking-widest text-muted-foreground">P4_HT_PO · hydro</div>
       </div>
     </div>
   );
@@ -1032,17 +1032,18 @@ function HalfGauge() {
       </svg>
       <div className="absolute bottom-0 text-center">
         <div className="font-mono text-2xl font-bold tabular" style={{ color: CH1 }}>{n.toFixed(1)}</div>
-        <div className="text-[9px] uppercase tracking-widest text-muted-foreground">kW · power</div>
+        <div className="text-[9px] uppercase tracking-widest text-muted-foreground">MW · P4_ST_PO</div>
       </div>
     </div>
   );
 }
 
 function WindEnergyBars() {
+  // Replit wind chart shape → steam MW bars + hydro MW line (plant tags)
   const data = Array.from({ length: 22 }, (_, i) => ({
     t: i,
-    power: 900 + Math.abs(Math.sin(i / 2)) * 1400 + Math.random() * 200,
-    wind: 8 + Math.sin(i / 3) * 3 + Math.random() * 1.5,
+    steam: 220 + Math.abs(Math.sin(i / 2)) * 90 + Math.random() * 12,
+    hydro: 8 + Math.sin(i / 3) * 3 + Math.random() * 1.5,
   }));
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -1053,8 +1054,8 @@ function WindEnergyBars() {
             <stop offset="100%" stopColor={CH1} stopOpacity="0.4" />
           </linearGradient>
         </defs>
-        <Bar dataKey="power" fill="url(#we-b)" radius={[3, 3, 0, 0]} animationDuration={1200} />
-        <Line type="monotone" dataKey="wind" stroke="white" strokeWidth={1.6} dot={false} style={{ filter: "drop-shadow(0 0 4px white)" }} />
+        <Bar dataKey="steam" fill="url(#we-b)" radius={[3, 3, 0, 0]} animationDuration={1200} />
+        <Line type="monotone" dataKey="hydro" stroke="white" strokeWidth={1.6} dot={false} style={{ filter: "drop-shadow(0 0 4px white)" }} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -1380,9 +1381,9 @@ export const DECKS: { name: string; tag: string; roleHint: string; cards: Card[]
     roleHint: "engineer",
     cards: [
       { id: "HydroUnit", label: "Hydro unit", hint: "P4_HT_PO faceplate", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH1} 14%, var(--surface)), var(--surface))`, render: () => <WindTurbine /> },
-      { id: "HydroEnergyBars", label: "Hydro energy", hint: "MW pulse", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH2} 12%, var(--surface)), var(--surface))`, render: () => <WindEnergyBars /> },
+      { id: "HydroEnergyBars", label: "Steam · hydro MW", hint: "P4_ST_PO bars · P4_HT_PO line", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH2} 12%, var(--surface)), var(--surface))`, render: () => <WindEnergyBars /> },
       { id: "ComponentTemps", label: "Component temps", hint: "Bearing · ambient · rotor · stator", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH1} 10%, var(--surface)), var(--surface))`, render: () => <TempChips /> },
-      { id: "PowerAndTarget", label: "Power · target", hint: "Live MW & completion", bg: `linear-gradient(135deg, color-mix(in oklab, var(--success) 12%, var(--surface)), var(--surface))`, render: () => (
+      { id: "PowerAndTarget", label: "Power · target", hint: "P4_ST_PO vs shift target", bg: `linear-gradient(135deg, color-mix(in oklab, var(--success) 12%, var(--surface)), var(--surface))`, render: () => (
         <div className="grid h-full grid-cols-[130px_1fr] items-center gap-3">
           <div className="h-24"><HalfGauge /></div>
           <div className="min-w-0"><TargetProgress /></div>

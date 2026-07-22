@@ -209,19 +209,19 @@ export function StatView({
 /** Deterministic-role helpers (non-agent path) */
 export function SparkTrend({
   data,
-  color = "#34d399",
+  color = "var(--primary)",
   unit = "",
 }: {
-  data: Array<{ ts: string; value: number }>;
+  data: Array<{ ts?: string; value?: number }>;
   color?: string;
   unit?: string;
 }) {
   const points = (data || []).slice(-120).map((d) => ({
-    t: String(d.ts).slice(11, 19),
+    t: String(d.ts ?? "").slice(11, 19),
     v: Number(d.value),
   }));
   if (points.length < 2) {
-    return <p className="text-xs text-zinc-500">No trend points yet</p>;
+    return <p className="text-xs text-muted-foreground">No trend points yet</p>;
   }
   return (
     <LineChartView

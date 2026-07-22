@@ -115,7 +115,7 @@ export async function engineerSnapshot() {
         score: outside ? 1 + dist : dist,
       };
     })
-    .filter(Boolean)
+    .filter((item): item is NonNullable<typeof item> => item !== null)
     .sort((a: any, b: any) => b.score - a.score)
     .slice(0, 5);
   const genTrend = await trend("P4_ST_PO", 1);

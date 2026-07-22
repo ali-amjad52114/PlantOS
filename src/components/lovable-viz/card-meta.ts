@@ -64,9 +64,9 @@ const BASE_LOVABLE_CARD_META: LovableCardMeta[] = [
   { type: "TurbineRotorCard", label: "Turbine rotor", hint: "P2_SIT01 live rpm", deck: 10, deckName: "Reliability", roleHint: "engineer", description: "Turbine rotor rpm visual. Engineer." },
   // Deck 11 — Hydro & feed
   { type: "HydroUnit", label: "Hydro unit", hint: "P4_HT_PO faceplate", deck: 11, deckName: "Hydro & feed", roleHint: "engineer", description: "Hydro unit faceplate visual. Engineer." },
-  { type: "HydroEnergyBars", label: "Hydro energy", hint: "MW pulse", deck: 11, deckName: "Hydro & feed", roleHint: "engineer", description: "Hydro energy bars. Engineer." },
+  { type: "HydroEnergyBars", label: "Steam · hydro MW", hint: "P4_ST_PO bars · P4_HT_PO line", deck: 11, deckName: "Hydro & feed", roleHint: "engineer", description: "Steam MW bars with hydro MW overlay. Engineer." },
   { type: "ComponentTemps", label: "Component temps", hint: "Bearing · ambient · rotor · stator", deck: 11, deckName: "Hydro & feed", roleHint: "engineer", description: "Component temperature chips. Engineer." },
-  { type: "PowerAndTarget", label: "Power · target", hint: "Live MW & completion", deck: 11, deckName: "Hydro & feed", roleHint: "engineer", description: "Half gauge + target progress. Engineer." },
+  { type: "PowerAndTarget", label: "Power · target", hint: "P4_ST_PO vs shift target", deck: 11, deckName: "Hydro & feed", roleHint: "engineer", description: "Half gauge + target progress. Engineer." },
   // Deck 12 — Value by area (finance)
   { type: "ValueByArea", label: "Value by area", hint: "Boiler · turbine · gen · water $", deck: 12, deckName: "Value by area", roleHint: "finance", description: "Semi-donut value by plant area. Finance." },
   { type: "PlantValueMap", label: "Plant value map", hint: "Density by area", deck: 12, deckName: "Value by area", roleHint: "finance", description: "Heat-blob plant value map. Finance." },

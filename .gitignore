@@ -60,3 +60,4 @@ data/hai/repo/
 /tmp-*.json
 /out-*.json
 /j*.json
+.env*

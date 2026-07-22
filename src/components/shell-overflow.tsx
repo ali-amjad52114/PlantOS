@@ -51,7 +51,7 @@ export function ShellOverflow({
             value={routeQuestion}
             onChange={(e) => onRouteQuestion(e.target.value)}
             rows={2}
-            className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-foreground outline-none focus:border-emerald-500/40"
+            className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
           />
         </label>
         <div className="flex flex-wrap content-start gap-2">
@@ -77,14 +77,14 @@ export function ShellOverflow({
       </div>
 
       <RunProgress progress={rtProgress} />
-      {routeNote && <p className="text-xs text-emerald-400/90">{routeNote}</p>}
+      {routeNote && <p className="text-xs text-primary">{routeNote}</p>}
       {rtRunId && <p className="font-mono text-[10px] text-muted-foreground">runId: {rtRunId}</p>}
 
       {showEvidence && evidence}
       {showAssumptions && assumptions}
 
       {showPrebuilt && (
-        <div className="max-h-[50vh] overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-3">
+        <div className="max-h-[50vh] overflow-y-auto rounded-2xl border border-border bg-muted/40 p-3">
           <PreBuiltCatalog />
         </div>
       )}
@@ -106,15 +106,15 @@ function OverflowBtn({
   active?: boolean;
 }) {
   const base =
-    "rounded-full px-3.5 py-1.5 text-sm transition disabled:opacity-50 border border-white/10";
+    "rounded-full px-3.5 py-1.5 text-sm transition disabled:opacity-50 border border-border";
   const styles =
     tone === "primary"
-      ? "bg-emerald-500 text-primary-foreground border-transparent"
+      ? "bg-primary text-primary-foreground border-transparent"
       : tone === "sky"
-        ? "bg-sky-600 text-white border-transparent"
+        ? "bg-[color:var(--chart-4)] text-primary-foreground border-transparent"
         : active
-          ? "bg-white/15 text-foreground"
-          : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-foreground";
+          ? "bg-primary/10 text-primary"
+          : "bg-surface text-muted-foreground hover:bg-muted hover:text-foreground";
   return (
     <button type="button" onClick={onClick} disabled={disabled} className={`${base} ${styles}`}>
       {children}
