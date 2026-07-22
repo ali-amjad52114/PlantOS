@@ -527,7 +527,7 @@ export default function PlantOSPage() {
       void revealBoundTower().finally(() => {
         revealInFlight.current = false;
       });
-    }, 50000);
+    }, 12000);
     return () => window.clearTimeout(t);
   }, [awaitingMode, awaitingQuestion, revealBoundTower]);
 
@@ -557,7 +557,7 @@ export default function PlantOSPage() {
     setMobileTab("visuals");
     const idx = resolveQuestionIndex(mode, question);
 
-    // Hide prior cards immediately — nothing until Trigger finishes.
+    // Hide prior cards briefly while we show progress, then bind CH (no OpenAI required).
     setTower(null);
     setData(null);
     setTowersByMode((prev) => {
@@ -593,6 +593,28 @@ export default function PlantOSPage() {
     });
 
     setPendingQuestion(question);
+
+    // ClickHouse bind does not need the LLM — reveal cards quickly so demos aren't stuck on Thinking.
+    if (idx != null) {
+      window.setTimeout(() => {
+        const pending = awaitingBindRef.current;
+        if (!pending || pending.question !== question || revealInFlight.current) return;
+        setStageProgress({
+          percentage: 75,
+          label: "Binding live ClickHouse cards…",
+          steps: [
+            { id: "trigger", label: "Trigger", done: true, active: false },
+            { id: "investigate", label: "Investigate", done: false, active: true },
+            { id: "bind", label: "Bind CH", done: false, active: true },
+            { id: "ready", label: "Ready", done: false, active: false },
+          ],
+        });
+        revealInFlight.current = true;
+        void revealBoundTower().finally(() => {
+          revealInFlight.current = false;
+        });
+      }, 1600);
+    }
   }
 
   const view = mode === "overview" ? null : data ?? agentVisuals[mode] ?? null;
