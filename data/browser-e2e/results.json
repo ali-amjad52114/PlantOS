@@ -1,0 +1,80 @@
+{
+  "pass": 12,
+  "fail": 0,
+  "total": 12,
+  "findings": [
+    {
+      "step": "home_title",
+      "ok": true,
+      "detail": "h1=\"One plant. One truth.\"",
+      "at": "2026-07-22T15:35:26.138Z"
+    },
+    {
+      "step": "brand_visible",
+      "ok": true,
+      "detail": "PlantOS label visible",
+      "at": "2026-07-22T15:35:26.151Z"
+    },
+    {
+      "step": "live_badge",
+      "ok": true,
+      "detail": "badge=\"LIVE\"",
+      "at": "2026-07-22T15:35:26.157Z"
+    },
+    {
+      "step": "live_max_row",
+      "ok": true,
+      "detail": "Live max: 2026-07-22 15:34:59",
+      "at": "2026-07-22T15:35:26.162Z"
+    },
+    {
+      "step": "replay_start",
+      "ok": true,
+      "detail": "badge=\"LIVE\"",
+      "at": "2026-07-22T15:35:28.116Z"
+    },
+    {
+      "step": "clicked_single_realtime",
+      "ok": true,
+      "detail": "clicked Single role (Realtime)",
+      "at": "2026-07-22T15:35:28.662Z"
+    },
+    {
+      "step": "realtime_investigate",
+      "ok": true,
+      "detail": "runId=runId: run_cmrw8uw2t69up0pn51279y81s; snippet=PLANTOS One plant. One truth. HAI → ClickHouse → chat.agent + Realtime + route/parallel roles LIVE Live max: 2026-07-22 15:34:59 Live rows: 89424 · age 29s REPLAY Start Pause Reset 0.5x 1x 2x 4x Engineer · ✓ Operations F",
+      "at": "2026-07-22T15:35:33.448Z"
+    },
+    {
+      "step": "evidence_drawer",
+      "ok": true,
+      "detail": "pre JSON visible",
+      "at": "2026-07-22T15:35:34.553Z"
+    },
+    {
+      "step": "clicked_route",
+      "ok": true,
+      "detail": "clicked Route & investigate",
+      "at": "2026-07-22T15:35:34.667Z"
+    },
+    {
+      "step": "route_investigate",
+      "ok": true,
+      "detail": "Routed to engineer (llm)",
+      "at": "2026-07-22T15:35:44.486Z"
+    },
+    {
+      "step": "ask_agent",
+      "ok": true,
+      "detail": "status=submitted; PLANTOS One plant. One truth. HAI → ClickHouse → chat.agent + Realtime + route/parallel roles LIVE Live max: 2026-07-22 15:35:35 Live rows: 90000 · age 4s REPLAY Start Pause Reset 0.5x 1x 2x 4x Engineer · ✓ Operations Finance Trigger.dev chat.agent · plantos-agent SUBMITTED",
+      "at": "2026-07-22T15:35:49.121Z"
+    },
+    {
+      "step": "console_errors",
+      "ok": true,
+      "detail": "none",
+      "at": "2026-07-22T15:35:49.121Z"
+    }
+  ],
+  "screenshotsDir": "c:\\AI\\Projects\\Clickhouse\\data\\browser-e2e"
+}

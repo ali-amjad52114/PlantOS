@@ -1,0 +1,161 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --card: #18181b;
+  --card-foreground: #fafafa;
+  --surface: #18181b;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --border: #3f3f46;
+  --primary: #059669;
+  --primary-foreground: #ecfdf5;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --accent: #34d399;
+  --accent-foreground: #ecfdf5;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --chart-1: #34d399;
+  --chart-2: #60a5fa;
+  --chart-3: #fbbf24;
+  --chart-4: #f472b6;
+  --chart-5: #a78bfa;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-surface: var(--surface);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.card-surface {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+
+.bg-surface {
+  background-color: var(--surface);
+}
+
+@keyframes pulse-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+.pulse-live {
+  animation: pulse-live 1.4s ease-in-out infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise {
+  animation: rise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.bar-grow {
+  transform-origin: left;
+  animation: bar-grow 1.1s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes draw-stroke {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.draw-stroke {
+  animation: draw-stroke 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes fade-scale {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.fade-scale {
+  animation: fade-scale 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes ping-ring {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.75;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+.ping-ring {
+  animation: ping-ring 1.8s ease-out infinite;
+}
+
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin-slow {
+  animation: spin-slow 14s linear infinite;
+}
+
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -60;
+  }
+}

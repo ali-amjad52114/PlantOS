@@ -1,0 +1,67 @@
+{
+  "pass": 9,
+  "fail": 0,
+  "total": 9,
+  "findings": [
+    {
+      "step": "home",
+      "ok": true,
+      "detail": "title ok",
+      "at": "2026-07-22T15:42:42.046Z"
+    },
+    {
+      "step": "live_badge",
+      "ok": true,
+      "detail": "badge present",
+      "at": "2026-07-22T15:42:42.055Z"
+    },
+    {
+      "step": "replay_start",
+      "ok": true,
+      "detail": "badge=LIVE",
+      "at": "2026-07-22T15:42:43.353Z"
+    },
+    {
+      "step": "realtime_investigate",
+      "ok": true,
+      "detail": "runId: run_cmrw947hy6cea0jobddl0trdg | engineer investigation complete",
+      "at": "2026-07-22T15:42:48.088Z"
+    },
+    {
+      "step": "route_investigate",
+      "ok": true,
+      "detail": "Routed to engineer (llm)",
+      "at": "2026-07-22T15:42:56.909Z"
+    },
+    {
+      "step": "ask_agent",
+      "ok": true,
+      "detail": "readyish=true; tools/viz=yes; snippet=PLANTOS One plant. One truth. HAI → ClickHouse → chat.agent + Realtime + route/parallel roles LIVE Live max: 2026-07-22 15:43:22 Live rows: 99792 · age 4s REPLAY Start Pause Reset 0.5x 1x 2x 4x Engineer · ✓ Operations Finance Trigger.dev chat.agent · plantos-agent READY [role=eng",
+      "at": "2026-07-22T15:43:34.198Z"
+    },
+    {
+      "step": "engineer_visual_present",
+      "ok": true,
+      "detail": "MW/generator content visible",
+      "at": "2026-07-22T15:43:34.203Z"
+    },
+    {
+      "step": "no_max_depth_console",
+      "ok": true,
+      "detail": "none",
+      "at": "2026-07-22T15:43:34.203Z"
+    },
+    {
+      "step": "console_errors_benign",
+      "ok": true,
+      "detail": "none",
+      "at": "2026-07-22T15:43:34.203Z"
+    }
+  ],
+  "screenshots": [
+    "e2e-01-home.png",
+    "e2e-02-realtime.png",
+    "e2e-03-route.png",
+    "e2e-04-agent.png"
+  ]
+}

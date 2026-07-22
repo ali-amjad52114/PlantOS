@@ -1,0 +1,12 @@
+{
+  "lastStatus": "Trigger.dev chat.agent · plantos-agent\nREADY",
+  "sawThinking": true,
+  "sawTool": true,
+  "sawAssistantText": true,
+  "sawError": false,
+  "errorText": "",
+  "consoleErrors": [],
+  "ok": true,
+  "softOnlySubmitted": false,
+  "finalSnippet": "PLANTOS One plant. One truth. HAI → ClickHouse → chat.agent + Realtime + route/parallel roles LIVE Live max: 2026-07-22 15:52:43 Live rows: 121680 · age 5s REPLAY Start Pause Reset 0.5x 1x 2x 4x Engineer · ✓ Operations Finance Trigger.dev chat.agent · plantos-agent READY [role=engineer] What is the current status of the generators and turbine? ✓ Engineer investigation Current Generator and Turbine Status Latest key measurements and operational state of the turbines, generators, and boiler systems. Turbine Speed 814 rpm Normal operation range Boiler Pressure 1.08 bar Within normal limits "
+}

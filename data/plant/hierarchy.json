@@ -1,0 +1,57 @@
+{
+  "plant": "HAI hybrid power testbed",
+  "flow": [
+    "water_treatment",
+    "boiler",
+    "turbine",
+    "generator"
+  ],
+  "areas": {
+    "water_treatment": {
+      "supports": "boiler",
+      "tags": [
+        "P3_LT01",
+        "P3_LCV01D",
+        "P3_LH",
+        "P3_LL"
+      ]
+    },
+    "boiler": {
+      "produces": "steam",
+      "tags": [
+        "P1_PIT01",
+        "P1_PIT02",
+        "P1_TIT01",
+        "P1_TIT02",
+        "P1_FT01",
+        "P1_LIT01",
+        "P1_PCV01Z",
+        "P1_FCV03Z"
+      ]
+    },
+    "turbine": {
+      "driven_by": "steam",
+      "tags": [
+        "P2_SIT01",
+        "P2_VT01e",
+        "P2_VXT02",
+        "P2_VYT02",
+        "P2_On",
+        "P2_Auto"
+      ]
+    },
+    "generator": {
+      "driven_by": "turbine",
+      "tags": [
+        "P4_ST_PO",
+        "P4_ST_LD",
+        "P4_ST_PT01",
+        "P4_ST_TT01",
+        "P4_ST_FD",
+        "P4_HT_PO"
+      ]
+    }
+  },
+  "productionTag": "P4_ST_PO",
+  "productionDecision": "Using P4_ST_PO as production. HAI HIL emulates steam-turbine power generation; no separate generator MW column in HAI 20.07 \u2014 auto-redefinition per product lock."
+}
