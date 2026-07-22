@@ -53,6 +53,7 @@ export function PlantChat({
   onStarterQuestion,
   onStreamProgress,
   onAgentBusyChange,
+  onAgentError,
 }: {
   role: Role;
   /** Persona this chat pane belongs to — sessions are filtered by this. */
@@ -71,6 +72,7 @@ export function PlantChat({
   /** Bubble Trigger stream progress to the visual stage (right). */
   onStreamProgress?: (progress: PopulateProgress | null) => void;
   onAgentBusyChange?: (busy: boolean, chatMode: string) => void;
+  onAgentError?: (message: string, chatMode: string) => void;
 }) {
   const [sessions, setSessions] = useState<StoredChat[]>([]);
   const [chatId, setChatId] = useState(() => newChatId());
@@ -122,6 +124,7 @@ export function PlantChat({
       onStarterQuestion={onStarterQuestion}
       onStreamProgress={onStreamProgress}
       onAgentBusyChange={onAgentBusyChange}
+      onAgentError={onAgentError}
     />
   );
 }
@@ -145,6 +148,7 @@ function ChatSession({
   onStarterQuestion,
   onStreamProgress,
   onAgentBusyChange,
+  onAgentError,
 }: {
   chatId: string;
   role: Role;
@@ -164,6 +168,7 @@ function ChatSession({
   onStarterQuestion?: (question: string) => void;
   onStreamProgress?: (progress: PopulateProgress | null) => void;
   onAgentBusyChange?: (busy: boolean, chatMode: string) => void;
+  onAgentError?: (message: string, chatMode: string) => void;
 }) {
   const transport = useTriggerChatTransport<typeof plantAgent>({
     task: "plantos-agent",
@@ -268,6 +273,14 @@ function ChatSession({
     lastStreamKey.current = streamProgressKey;
     onStreamProgress?.(streamProgress);
   }, [streamProgressKey, streamProgress, onStreamProgress]);
+
+  const lastErrorMsg = useRef<string | null>(null);
+  useEffect(() => {
+    if (!error?.message) return;
+    if (lastErrorMsg.current === error.message) return;
+    lastErrorMsg.current = error.message;
+    onAgentError?.(error.message, mode);
+  }, [error, mode, onAgentError]);
 
   function startNewChat() {
     const id = newChatId();
@@ -398,7 +411,13 @@ function ChatSession({
             {messages.map((m) => (
               <Message key={m.id} message={m} hideTowers={hideTowersInChat} />
             ))}
-            {error && <p className="text-xs text-danger">Agent error: {error.message}</p>}
+            {error && (
+              <p className="rounded-lg border border-[color:var(--danger)]/30 bg-[color:var(--danger)]/10 px-3 py-2 text-xs text-[color:var(--danger)]">
+                {/quota|insufficient_quota|billing/i.test(error.message)
+                  ? "OpenAI quota exceeded — add billing credits or set a new OPEN_AI key in Trigger/.env. Live plant cards can still load from ClickHouse."
+                  : `Agent error: ${error.message}`}
+              </p>
+            )}
           </div>
 
           <form

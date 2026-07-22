@@ -499,6 +499,38 @@ export default function PlantOSPage() {
     [revealBoundTower]
   );
 
+  const onAgentError = useCallback(
+    (message: string, chatMode: string) => {
+      const friendly = /quota|insufficient_quota|billing/i.test(message)
+        ? "OpenAI quota exceeded — add credits or update OPEN_AI. Showing ClickHouse cards anyway."
+        : message;
+      setError(friendly);
+      const pending = awaitingBindRef.current;
+      if (!pending || pending.mode !== chatMode || revealInFlight.current) return;
+      revealInFlight.current = true;
+      void revealBoundTower().finally(() => {
+        revealInFlight.current = false;
+      });
+    },
+    [revealBoundTower]
+  );
+
+  // If Trigger/OpenAI hangs, don't leave the stage empty forever.
+  useEffect(() => {
+    if (!awaitingMode || !awaitingQuestion) return;
+    const t = window.setTimeout(() => {
+      if (!awaitingBindRef.current || revealInFlight.current) return;
+      setError(
+        "Agent still waiting on Trigger/OpenAI — showing ClickHouse cards so the demo can continue."
+      );
+      revealInFlight.current = true;
+      void revealBoundTower().finally(() => {
+        revealInFlight.current = false;
+      });
+    }, 50000);
+    return () => window.clearTimeout(t);
+  }, [awaitingMode, awaitingQuestion, revealBoundTower]);
+
   function onModeChange(next: ShellMode) {
     setMode(next);
     const ar = agentRoleForMode(next);
@@ -694,6 +726,7 @@ export default function PlantOSPage() {
           onStarterQuestion={askQuestion}
           onStreamProgress={onStreamProgress}
           onAgentBusyChange={onAgentBusyChange}
+          onAgentError={onAgentError}
         />
       }
       stage={
