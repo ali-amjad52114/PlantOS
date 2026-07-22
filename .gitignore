@@ -34,3 +34,9 @@ plantos/out-*.json
 plantos/j*.json
 plantos/dev.*.log
 data/hai/repo/
+
+plantos/start.json
+plantos/tick.json
+plantos/tmp-*.json
+plantos/pause.json
+plantos/speed.json
