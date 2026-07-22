@@ -1,20 +1,23 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-  --card: #18181b;
-  --card-foreground: #fafafa;
-  --surface: #18181b;
-  --muted: #27272a;
-  --muted-foreground: #a1a1aa;
-  --border: #3f3f46;
-  --primary: #059669;
-  --primary-foreground: #ecfdf5;
-  --secondary: #27272a;
-  --secondary-foreground: #fafafa;
+  --background: #07090b;
+  --background-elevated: #0c1014;
+  --foreground: #e8ecef;
+  --card: #12171c;
+  --card-foreground: #f4f7f8;
+  --surface: #141a20;
+  --surface-elevated: #1a222a;
+  --muted: #1e262e;
+  --muted-foreground: #8b969f;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --primary: #10b981;
+  --primary-foreground: #04140f;
+  --secondary: #1e262e;
+  --secondary-foreground: #f4f7f8;
   --accent: #34d399;
-  --accent-foreground: #ecfdf5;
+  --accent-foreground: #04140f;
   --success: #34d399;
   --warning: #fbbf24;
   --danger: #f87171;
@@ -23,6 +26,9 @@
   --chart-3: #fbbf24;
   --chart-4: #f472b6;
   --chart-5: #a78bfa;
+  --glass: rgba(12, 16, 20, 0.72);
+  --shell-glow: radial-gradient(1200px 600px at 10% -10%, rgba(16, 185, 129, 0.12), transparent 55%),
+    radial-gradient(900px 500px at 90% 0%, rgba(56, 189, 248, 0.06), transparent 50%);
 }
 
 @theme inline {
@@ -53,15 +59,28 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
+.shell-bg {
+  background-color: var(--background);
+  background-image: var(--shell-glow);
+  min-height: 100vh;
+}
+
+.glass-bar {
+  background: var(--glass);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
 .tabular {
   font-variant-numeric: tabular-nums;
 }
 
 .card-surface {
-  background-color: var(--surface);
+  background: linear-gradient(180deg, var(--surface-elevated), var(--surface));
   border: 1px solid var(--border);
-  border-radius: 0.875rem;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  border-radius: 1rem;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 40px rgba(0, 0, 0, 0.35);
 }
 
 .bg-surface {

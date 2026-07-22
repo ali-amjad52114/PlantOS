@@ -39,7 +39,20 @@
 1. `npm run dev -- -p 3001` (repo root)
 2. `npm run dev:trigger`
 3. Dashboard env: **`OPEN_AI`** + **`CLICKHOUSE_URL`**
-4. Open http://localhost:3001 → **Route & investigate** / **All roles parallel** / Ask agent
+4. Open http://localhost:3001 → mode nav · Ask agent (left) · visual stage (right) · ⋯ overflow for Route/Parallel/Pre-built
+
+## Main shell redesign
+
+**Last update:** Premium chat | stage shell with Overview · Engineer · Finance · Operations · Maintenance · Safety.
+
+| Check | Status |
+|-------|--------|
+| Top mode nav + glass bar | **PASS** |
+| Left chat / right visual stage | **PASS** |
+| Overflow: Route · Parallel · Pre-built · Evidence | **PASS** |
+| `tsc` | **PASS** |
+
+**See:** `lessons/PLAN_MAIN_SHELL_REDESIGN.md`
 
 ## Thesis
 One plant. One truth. Different intelligence for every role.

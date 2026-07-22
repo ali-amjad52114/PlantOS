@@ -32,9 +32,17 @@ const TOOL_TO_ROLE: Record<string, Role> = {
 export function PlantChat({
   role,
   onToolVisual,
+  onTower,
+  hideTowersInChat = false,
+  shell = false,
+  suggestedOverride,
 }: {
   role: Role;
   onToolVisual: (role: Role, payload: any) => void;
+  onTower?: (tower: PlantTowerPayload) => void;
+  hideTowersInChat?: boolean;
+  shell?: boolean;
+  suggestedOverride?: string;
 }) {
   const transport = useTriggerChatTransport<typeof plantAgent>({
     task: "plantos-agent",
@@ -49,23 +57,36 @@ export function PlantChat({
   });
   const [input, setInput] = useState("");
   const busy = status === "submitted" || status === "streaming";
+  const suggested = suggestedOverride ?? SUGGESTED[role];
 
   // Guard: useChat can return a new `messages` reference every render while streaming.
   // Calling onToolVisual → parent setState without dedupe caused max update depth.
   const onToolVisualRef = useRef(onToolVisual);
   onToolVisualRef.current = onToolVisual;
+  const onTowerRef = useRef(onTower);
+  onTowerRef.current = onTower;
   const pushedToolOutputs = useRef(new Set<string>());
+  const pushedTowers = useRef(new Set<string>());
 
   useEffect(() => {
     for (const m of messages) {
       if (m.role !== "assistant") continue;
       for (const part of m.parts as any[]) {
         const mappedRole = TOOL_TO_ROLE[part.type];
-        if (!mappedRole || part.state !== "output-available" || part.output == null) continue;
-        const key = `${m.id}:${part.toolCallId ?? part.type}:${mappedRole}`;
-        if (pushedToolOutputs.current.has(key)) continue;
-        pushedToolOutputs.current.add(key);
-        onToolVisualRef.current(mappedRole, part.output);
+        if (mappedRole && part.state === "output-available" && part.output != null) {
+          const key = `${m.id}:${part.toolCallId ?? part.type}:${mappedRole}`;
+          if (!pushedToolOutputs.current.has(key)) {
+            pushedToolOutputs.current.add(key);
+            onToolVisualRef.current(mappedRole, part.output);
+          }
+        }
+        if (part.type === "data-plant-tower" && part.data && onTowerRef.current) {
+          const tkey = `${m.id}:tower:${part.data.deck}:${part.data.role}`;
+          if (!pushedTowers.current.has(tkey)) {
+            pushedTowers.current.add(tkey);
+            onTowerRef.current(part.data as PlantTowerPayload);
+          }
+        }
       }
     }
   }, [messages]);
@@ -80,49 +101,92 @@ export function PlantChat({
   const streamProgress = deriveAgentStreamProgress(messages, status);
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40">
-      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
+    <div
+      className={
+        shell
+          ? "card-surface flex h-full min-h-0 flex-col overflow-hidden"
+          : "rounded-lg border border-zinc-800 bg-zinc-900/40"
+      }
+    >
+      <div
+        className={`flex items-center justify-between px-4 py-3 text-xs ${
+          shell ? "border-b border-white/5 text-muted-foreground" : "border-b border-zinc-800 text-zinc-400"
+        }`}
+      >
         <span>
-          Trigger.dev chat.agent · clientData.role=
-          <span className="text-emerald-400/90">{role}</span>
+          {shell ? (
+            <>
+              Ask agent · <span className="text-emerald-400/90 capitalize">{role}</span>
+            </>
+          ) : (
+            <>
+              Trigger.dev chat.agent · clientData.role=
+              <span className="text-emerald-400/90">{role}</span>
+            </>
+          )}
         </span>
         <span className="uppercase tracking-wide">{status}</span>
       </div>
 
-      {streamProgress && <AgentStreamProgress progress={streamProgress} />}
+      {streamProgress && <AgentStreamProgress progress={streamProgress} shell={shell} />}
 
-      <div className="max-h-96 space-y-3 overflow-y-auto px-3 py-3 text-sm">
+      <div
+        className={`min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 text-sm ${
+          shell ? "" : "max-h-96"
+        }`}
+      >
         {messages.length === 0 && (
-          <p className="text-zinc-500">
-            Ask via Trigger agent (OPEN_AI in dashboard). Suggested: {SUGGESTED[role]}
+          <p className={shell ? "text-muted-foreground" : "text-zinc-500"}>
+            {shell
+              ? `Suggested: ${suggested}`
+              : `Ask via Trigger agent (OPEN_AI in dashboard). Suggested: ${suggested}`}
           </p>
         )}
         {messages.map((m) => (
-          <Message key={m.id} message={m} />
+          <Message key={m.id} message={m} hideTowers={hideTowersInChat} />
         ))}
         {error && <p className="text-xs text-red-400">Agent error: {error.message}</p>}
       </div>
 
       <form
-        className="flex gap-2 border-t border-zinc-800 p-3"
+        className={`flex gap-2 p-3 ${shell ? "border-t border-white/5" : "border-t border-zinc-800"}`}
         onSubmit={(e) => {
           e.preventDefault();
-          submit(input || SUGGESTED[role]);
+          submit(input || suggested);
         }}
       >
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={SUGGESTED[role]}
-          className="flex-1 rounded-md bg-zinc-950 px-3 py-2 text-sm ring-1 ring-zinc-700 outline-none focus:ring-emerald-600"
+          placeholder={suggested}
+          className={
+            shell
+              ? "flex-1 rounded-full border border-white/10 bg-black/30 px-4 py-2.5 text-sm outline-none focus:border-emerald-500/40"
+              : "flex-1 rounded-md bg-zinc-950 px-3 py-2 text-sm ring-1 ring-zinc-700 outline-none focus:ring-emerald-600"
+          }
         />
         {busy ? (
-          <button type="button" onClick={() => stop()} className="rounded-md bg-zinc-700 px-3 py-2 text-sm">
+          <button
+            type="button"
+            onClick={() => stop()}
+            className={
+              shell
+                ? "rounded-full bg-white/10 px-4 py-2 text-sm"
+                : "rounded-md bg-zinc-700 px-3 py-2 text-sm"
+            }
+          >
             Stop
           </button>
         ) : (
-          <button type="submit" className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white">
-            Ask agent
+          <button
+            type="submit"
+            className={
+              shell
+                ? "rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-primary-foreground"
+                : "rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white"
+            }
+          >
+            Ask
           </button>
         )}
       </form>
@@ -266,23 +330,35 @@ function deriveAgentStreamProgress(
   return { percentage, label, steps };
 }
 
-function AgentStreamProgress({ progress }: { progress: StreamProgress }) {
+function AgentStreamProgress({
+  progress,
+  shell,
+}: {
+  progress: StreamProgress;
+  shell?: boolean;
+}) {
   const pct = Math.max(0, Math.min(100, Math.round(progress.percentage)));
   return (
-    <div className="border-b border-zinc-800 bg-zinc-950/60 px-3 py-2">
+    <div
+      className={
+        shell
+          ? "border-b border-white/5 bg-black/20 px-4 py-2"
+          : "border-b border-zinc-800 bg-zinc-950/60 px-3 py-2"
+      }
+    >
       <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
-        <span className="text-zinc-300">{progress.label}</span>
-        <span className="tabular-nums text-zinc-500">{pct}%</span>
+        <span className={shell ? "text-foreground/90" : "text-zinc-300"}>{progress.label}</span>
+        <span className="tabular-nums text-muted-foreground">{pct}%</span>
       </div>
-      <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+      <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-white/10">
         <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${pct}%` }} />
       </div>
-      <div className="flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-zinc-500">
+      <div className="flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
         {progress.steps.map((s) => (
           <span
             key={s.id}
             className={
-              s.done ? "text-emerald-400" : s.active ? "text-zinc-200" : "text-zinc-600"
+              s.done ? "text-emerald-400" : s.active ? "text-foreground/80" : "text-muted-foreground/50"
             }
           >
             {s.done ? "✓ " : s.active ? "● " : "○ "}
@@ -290,23 +366,21 @@ function AgentStreamProgress({ progress }: { progress: StreamProgress }) {
           </span>
         ))}
       </div>
-      <p className="mt-1 text-[10px] text-zinc-600">Live chat stream progress</p>
     </div>
   );
 }
 
-function Message({ message }: { message: UIMessage }) {
+function Message({ message, hideTowers }: { message: UIMessage; hideTowers?: boolean }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl bg-emerald-700/80 px-3 py-2 text-sm">
+        <div className="max-w-[85%] rounded-2xl bg-emerald-600/90 px-3 py-2 text-sm text-primary-foreground">
           {message.parts.map((part, i) => (part.type === "text" ? <span key={i}>{part.text}</span> : null))}
         </div>
       </div>
     );
   }
 
-  // Only render the latest renderVisualization / plant-tower — avoid duplicates on retries.
   let lastVizIndex = -1;
   let lastTowerIndex = -1;
   message.parts.forEach((p, i) => {
@@ -315,18 +389,13 @@ function Message({ message }: { message: UIMessage }) {
   });
 
   return (
-    <div className="space-y-1 text-sm text-zinc-200">
+    <div className="space-y-1 text-sm text-foreground/90">
       {message.parts.map((part, i) => {
-        if (part.type === "tool-renderVisualization" && i !== lastVizIndex) {
-          return null;
+        if (part.type === "tool-renderVisualization" && i !== lastVizIndex) return null;
+        if (part.type === "data-plant-tower") {
+          if (hideTowers || i !== lastTowerIndex) return null;
         }
-        if (part.type === "data-plant-tower" && i !== lastTowerIndex) {
-          return null;
-        }
-        // Transient steps are for the progress bar only
-        if (part.type === "data-investigation-step") {
-          return null;
-        }
+        if (part.type === "data-investigation-step") return null;
         const key = (part as any).toolCallId ?? `${part.type}-${i}`;
         return <MessagePart key={key} part={part} />;
       })}
@@ -465,8 +534,8 @@ export function RoleVisual({ role, data }: { role: Role; data: any }) {
 
 function Card({ title, value }: { title: string; value: string }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
-      <p className="text-xs uppercase tracking-wide text-zinc-500">{title}</p>
+    <div className="card-surface p-4">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{title}</p>
       <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
     </div>
   );
