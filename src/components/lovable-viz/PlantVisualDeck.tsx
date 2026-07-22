@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { REPLIT_DECKS } from "./replit-visuals";
+import { useCardLive } from "./card-live-context";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import {
   Area,
@@ -111,6 +112,7 @@ function LiveBars() {
 }
 
 function Donut() {
+  const live = useCardLive();
   return (
     <div className="relative h-full w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -130,22 +132,26 @@ function Donut() {
           </Pie>
         </PieChart>
       </ResponsiveContainer>
-      <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
-        <div>
-          <div className="text-2xl font-semibold tabular">
-            <CU value={248} />k
+      {!live && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
+          <div>
+            <div className="text-2xl font-semibold tabular">
+              <CU value={248} />k
+            </div>
+            <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Energy $</div>
           </div>
-          <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Energy $</div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
 function Gauge({ value = 74, color = CH1 }: { value?: number; color?: string }) {
+  const live = useCardLive();
+  const shown = live && Number.isFinite(live.primary) ? Number(live.primary) : value;
   const c = 2 * Math.PI * 42;
-  const dash = (value / 100) * c;
-  const n = useCountUp(value, 1200);
+  const dash = (Math.min(100, Math.max(0, shown)) / 100) * c;
+  const n = useCountUp(shown, 1200);
   return (
     <div className="relative grid h-full w-full place-items-center">
       <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
@@ -162,17 +168,30 @@ function Gauge({ value = 74, color = CH1 }: { value?: number; color?: string }) 
           style={{ transition: "stroke-dasharray 1.4s cubic-bezier(0.2,0.7,0.2,1)" }}
         />
       </svg>
-      <div className="absolute text-center">
-        <div className="text-2xl font-semibold tabular">{Math.round(n)}%</div>
-        <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Of target</div>
-      </div>
+      {!live && (
+        <div className="absolute text-center">
+          <div className="text-2xl font-semibold tabular">{Math.round(n)}%</div>
+          <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Of target</div>
+        </div>
+      )}
     </div>
   );
 }
 
 function PulseNumber({ base, prefix = "", suffix = "" }: { base: number; prefix?: string; suffix?: string }) {
-  const live = useLiveNumber(base, 0.006, 1800);
-  const n = useCountUp(live, 900);
+  const live = useCardLive();
+  const seed = useLiveNumber(base, 0.006, 1800);
+  const n = useCountUp(seed, 900);
+  // When bound, left column owns the number — keep only the spark so nothing fights it.
+  if (live) {
+    return (
+      <div className="flex h-full flex-col justify-end">
+        <div className="h-16">
+          <LiveArea />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex h-full flex-col justify-center">
       <div className="text-5xl font-semibold leading-none tabular">
@@ -996,12 +1015,14 @@ function TempChips() {
 }
 
 function HalfGauge() {
-  const live = useLiveNumber(64.6, 0.01, 1800);
-  const n = useCountUp(live, 800);
-  const pct = Math.min(1, n / 100);
+  const live = useCardLive();
+  const seed = useLiveNumber(64.6, 0.01, 1800);
+  const shown = live && Number.isFinite(live.primary) ? Number(live.primary) : seed;
+  // Power·target binds %; keep needle on 0–100. Other uses treat as MW scaled.
+  const pct = Math.min(1, (live?.unit === "%" ? shown : shown) / 100);
+  const n = useCountUp(shown, 800);
   const r = 40;
   const c = Math.PI * r;
-  // Needle stays in the arc; value lives below so it never collides.
   const needleLen = 26;
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-0.5">
@@ -1050,12 +1071,14 @@ function HalfGauge() {
           <circle cx="60" cy="58" r="3.5" fill="var(--foreground)" />
         </g>
       </svg>
-      <div className="shrink-0 text-center leading-none">
-        <div className="font-mono text-base font-bold tabular" style={{ color: CH1 }}>
-          {n.toFixed(1)}
+      {!live && (
+        <div className="shrink-0 text-center leading-none">
+          <div className="font-mono text-base font-bold tabular" style={{ color: CH1 }}>
+            {n.toFixed(1)}
+          </div>
+          <div className="text-[8px] uppercase tracking-widest text-muted-foreground">MW</div>
         </div>
-        <div className="text-[8px] uppercase tracking-widest text-muted-foreground">MW</div>
-      </div>
+      )}
     </div>
   );
 }
@@ -1084,9 +1107,13 @@ function WindEnergyBars() {
 }
 
 function TargetProgress() {
+  const bound = useCardLive();
   const target = 150000;
-  const live = useLiveNumber(147732, 0.002, 2000);
-  const pct = Math.min(1, live / target);
+  const seed = useLiveNumber(147732, 0.002, 2000);
+  const pct = bound && Number.isFinite(bound.primary)
+    ? Math.min(1, Math.max(0, Number(bound.primary) / 100))
+    : Math.min(1, seed / target);
+  const completeLabel = (pct * 100).toFixed(1);
   return (
     <div className="flex h-full flex-col justify-center gap-2">
       <div className="grid grid-cols-3 gap-1 text-[8px] uppercase tracking-widest text-muted-foreground">
@@ -1095,11 +1122,13 @@ function TargetProgress() {
           Target
         </div>
         <div className="text-center">
-          <div className="font-mono text-xs font-bold tabular" style={{ color: CH1 }}>{(live - target).toFixed(0)}</div>
+          <div className="font-mono text-xs font-bold tabular" style={{ color: CH1 }}>
+            {bound ? "—" : (seed - target).toFixed(0)}
+          </div>
           Delta
         </div>
         <div className="text-right">
-          <div className="font-mono text-xs font-bold text-foreground tabular">{(pct * 100).toFixed(1)}%</div>
+          <div className="font-mono text-xs font-bold text-foreground tabular">{completeLabel}%</div>
           Complete
         </div>
       </div>
@@ -1108,7 +1137,11 @@ function TargetProgress() {
         <div className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background" style={{ left: `${pct * 100}%`, background: CH1, boxShadow: `0 0 10px ${CH1}` }} />
       </div>
       <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
-        <span>0</span><span className="pulse-live" style={{ color: CH1 }}>● live</span><span>{target.toLocaleString()}</span>
+        <span>0</span>
+        <span className="pulse-live" style={{ color: CH1 }}>
+          ● live
+        </span>
+        <span>{target.toLocaleString()}</span>
       </div>
     </div>
   );
@@ -1117,13 +1150,18 @@ function TargetProgress() {
 /* ---------- borrower / soft dashboard visuals ---------- */
 
 function SemiDonutLegend() {
+  const bound = useCardLive();
   const items = [
     { l: "Gen", v: 18.6, c: CH1 },
     { l: "Turb", v: 3.9, c: CH5 },
     { l: "Boil", v: 3.2, c: "var(--success)" },
     { l: "Water", v: 0.8, c: "var(--muted-foreground)" },
   ];
-  const live = useCountUp(26.5, 1200);
+  const seed = useCountUp(26.5, 1200);
+  const center =
+    bound?.unit === "USD" && Number.isFinite(bound.primary)
+      ? (Number(bound.primary) / 1000).toFixed(1)
+      : seed.toFixed(1);
   return (
     <div className="grid h-full w-full grid-cols-2 items-center gap-3">
       <div className="relative">
@@ -1139,10 +1177,12 @@ function SemiDonutLegend() {
           <path d="M 12 68 A 48 48 0 0 1 108 68" stroke="url(#sd-g)" strokeWidth="10" fill="none" strokeLinecap="round"
             strokeDasharray="150" strokeDashoffset="30" style={{ transition: "stroke-dashoffset 1.4s" }} />
         </svg>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center pb-2">
-          <div className="font-mono text-xl font-bold tabular">${live.toFixed(1)}k</div>
-          <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Shift value</div>
-        </div>
+        {!bound && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center pb-2">
+            <div className="font-mono text-xl font-bold tabular">${center}k</div>
+            <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Shift value</div>
+          </div>
+        )}
       </div>
       <div className="space-y-1.5">
         {items.map((it, i) => (

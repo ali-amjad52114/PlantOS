@@ -19,7 +19,7 @@ export function PlantTowerGrid({ tower }: { tower: PlantTowerPayload }) {
         </div>
         <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
           {bound
-            ? `Q${(tower.questionIndex ?? 0) + 1} · ${tower.dataSource ?? "ch"} · ${tower.elapsedMs ?? "—"}ms`
+            ? `Q${(tower.questionIndex ?? 0) + 1} · ${tower.elapsedMs ?? "—"}ms`
             : "durable tower"}
         </span>
       </div>
