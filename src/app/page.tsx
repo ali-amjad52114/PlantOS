@@ -55,6 +55,7 @@ export default function PlantOSPage() {
   const [stageProgress, setStageProgress] = useState<PopulateProgress | null>(null);
   const [awaitingQuestion, setAwaitingQuestion] = useState<string | null>(null);
   const [awaitingMode, setAwaitingMode] = useState<ShellMode | null>(null);
+  const [chatEpoch, setChatEpoch] = useState(0);
   const askBridgeRef = useRef<((q: string) => void) | null>(null);
   const modeRef = useRef<ShellMode>(mode);
   modeRef.current = mode;
@@ -555,6 +556,8 @@ export default function PlantOSPage() {
   function askQuestion(question: string) {
     setError(null);
     setMobileTab("visuals");
+    // Remount chat so a stuck "submitted" transport can accept the new ask.
+    setChatEpoch((n) => n + 1);
     const idx = resolveQuestionIndex(mode, question);
 
     // Hide prior cards briefly while we show progress, then bind CH (no OpenAI required).
@@ -733,7 +736,7 @@ export default function PlantOSPage() {
       }
       chat={
         <PlantChat
-          key={mode}
+          key={`${mode}:${chatEpoch}`}
           role={agentRole}
           mode={mode}
           onToolVisual={onToolVisual}
