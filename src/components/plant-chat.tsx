@@ -228,10 +228,18 @@ function ChatSession({
 
   function submit(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || busy) return;
-    rememberSession(trimmed);
-    sendMessage({ text: trimmed });
-    setInput("");
+    if (!trimmed) return;
+    const kick = () => {
+      rememberSession(trimmed);
+      sendMessage({ text: trimmed });
+      setInput("");
+    };
+    if (busy) {
+      stop();
+      window.setTimeout(kick, 350);
+      return;
+    }
+    kick();
   }
 
   useEffect(() => {
@@ -414,8 +422,10 @@ function ChatSession({
             {error && (
               <p className="rounded-lg border border-[color:var(--danger)]/30 bg-[color:var(--danger)]/10 px-3 py-2 text-xs text-[color:var(--danger)]">
                 {/quota|insufficient_quota|billing/i.test(error.message)
-                  ? "OpenAI quota exceeded — add billing credits or set a new OPEN_AI key in Trigger/.env. Live plant cards can still load from ClickHouse."
-                  : `Agent error: ${error.message}`}
+                  ? "OpenAI quota exceeded — add billing credits or set OPEN_AI in Trigger.dev. Plant cards still load from ClickHouse."
+                  : /an error occurred/i.test(error.message)
+                    ? "Trigger chat session failed to start. Click Stop, then ask again. Cards still load from ClickHouse."
+                    : `Agent error: ${error.message}`}
               </p>
             )}
           </div>

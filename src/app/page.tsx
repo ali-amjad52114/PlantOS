@@ -55,7 +55,6 @@ export default function PlantOSPage() {
   const [stageProgress, setStageProgress] = useState<PopulateProgress | null>(null);
   const [awaitingQuestion, setAwaitingQuestion] = useState<string | null>(null);
   const [awaitingMode, setAwaitingMode] = useState<ShellMode | null>(null);
-  const [chatEpoch, setChatEpoch] = useState(0);
   const askBridgeRef = useRef<((q: string) => void) | null>(null);
   const modeRef = useRef<ShellMode>(mode);
   modeRef.current = mode;
@@ -408,6 +407,7 @@ export default function PlantOSPage() {
       setTower(payload);
       setTowersByMode((prev) => ({ ...prev, [pending.mode]: payload }));
       flushHeldVisual(pending.mode);
+      setError(null);
 
       setStageProgress({
         percentage: 100,
@@ -502,10 +502,7 @@ export default function PlantOSPage() {
 
   const onAgentError = useCallback(
     (message: string, chatMode: string) => {
-      const friendly = /quota|insufficient_quota|billing/i.test(message)
-        ? "OpenAI quota exceeded — add credits or update OPEN_AI. Showing ClickHouse cards anyway."
-        : message;
-      setError(friendly);
+      // Don't paint the whole shell red — cards can still demo from ClickHouse.
       const pending = awaitingBindRef.current;
       if (!pending || pending.mode !== chatMode || revealInFlight.current) return;
       revealInFlight.current = true;
@@ -556,8 +553,6 @@ export default function PlantOSPage() {
   function askQuestion(question: string) {
     setError(null);
     setMobileTab("visuals");
-    // Remount chat so a stuck "submitted" transport can accept the new ask.
-    setChatEpoch((n) => n + 1);
     const idx = resolveQuestionIndex(mode, question);
 
     // Hide prior cards briefly while we show progress, then bind CH (no OpenAI required).
@@ -736,7 +731,7 @@ export default function PlantOSPage() {
       }
       chat={
         <PlantChat
-          key={`${mode}:${chatEpoch}`}
+          key={mode}
           role={agentRole}
           mode={mode}
           onToolVisual={onToolVisual}
