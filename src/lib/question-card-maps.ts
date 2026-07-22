@@ -46,7 +46,10 @@ function entry(
   };
 }
 
-/** Locked 18 maps from PLAN_QUESTION_CARD_CH_BIND — do not invent types. */
+/** Locked Q1 demo maps (user-specified Lovable visuals):
+ *  Finance Q1 → Visual 1 · Maintenance Q1 → Visual 5 · Safety Q1 → Visual 12
+ *  Engineer Q1 → Visual 11 (Replit wind pack → hydro/steam plant tags)
+ */
 export const QUESTION_CARD_MAPS: QuestionCardMap[] = [
   // Overview
   entry("overview", 0, 7, "Plant-wide live", [

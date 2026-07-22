@@ -7,15 +7,20 @@ export function PlantTowerGrid({ tower }: { tower: PlantTowerPayload }) {
   const bound = tower.source === "question-map";
   return (
     <div className="my-2 space-y-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
-        <span className="font-medium text-primary">
-          {tower.deckName} · {tower.mode ?? tower.role}
-        </span>
-        <span className="uppercase tracking-wide text-muted-foreground">
-          Deck {tower.deck}
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+            Lovable Visual {tower.deck}
+          </p>
+          <p className="text-sm font-semibold text-foreground">
+            {tower.deckName}
+            {tower.mode ? ` · ${tower.mode}` : ` · ${tower.role}`}
+          </p>
+        </div>
+        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
           {bound
-            ? ` · Q${(tower.questionIndex ?? 0) + 1} · ${tower.dataSource ?? "ch"} · ${tower.elapsedMs ?? "—"}ms`
-            : " · durable tower"}
+            ? `Q${(tower.questionIndex ?? 0) + 1} · ${tower.dataSource ?? "ch"} · ${tower.elapsedMs ?? "—"}ms`
+            : "durable tower"}
         </span>
       </div>
       {tower.question && (

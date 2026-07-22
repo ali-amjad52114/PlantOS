@@ -102,7 +102,9 @@ export function VisualStage({
                 <PlantTowerGrid tower={tower} />
               </div>
             )}
+            {/* Keep stage on the mapped Lovable visual during demos — don't bury it under RoleVisual. */}
             {roleData &&
+              tower?.source !== "question-map" &&
               (agentRole === "engineer" ||
                 agentRole === "finance" ||
                 agentRole === "operations") && (
@@ -201,8 +203,15 @@ function EmptyPersonaStage({
       </p>
       <h3 className="mt-2 text-xl font-semibold tracking-tight">Ask to fill this stage</h3>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">
-        Each starter question maps to a different 4-card tower filled from ClickHouse after
-        Trigger.dev finishes.
+        {mode === "finance"
+          ? "Q1 → Lovable Visual 1 (Energy value)."
+          : mode === "maintenance"
+            ? "Q1 → Lovable Visual 5 (Plant floor)."
+            : mode === "safety"
+              ? "Q1 → Lovable Visual 12 (Value by area)."
+              : mode === "engineer"
+                ? "Q1 → Lovable Visual 11 (Hydro & feed · Replit wind pack)."
+                : "Each starter maps to a Lovable visual deck with ClickHouse after Trigger finishes."}
       </p>
       <div className="mt-5 grid gap-2">
         {questions.map((q, i) => (
