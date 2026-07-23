@@ -213,9 +213,37 @@ export function upsertBoundTowerAsCards(
 /** First ask lands exactly this many question-relevant charts on the canvas. */
 export const FIRST_ASK_CANVAS_CARD_COUNT = 2;
 
+/** Pins created by first-ask / bound-tower auto-land (safe to replace on a new first ask). */
+export function isAutoBoundCanvasPin(pin: CanvasPin): boolean {
+  if (pin.kind === "card" && pin.payload.kind === "card") {
+    const src = pin.payload.meta?.source;
+    if (src === "selected" || src === "question-map" || src === "role-default") return true;
+    if (pin.id.startsWith("bound_")) return true;
+  }
+  return false;
+}
+
+/** Drop prior auto-landed cards, then land ≤maxCards from the new tower. */
+export function replaceFirstAskCanvasPins(
+  existing: CanvasPin[],
+  tower: PlantTowerPayload,
+  dismissedIds?: ReadonlySet<string>,
+  maxCards = FIRST_ASK_CANVAS_CARD_COUNT
+): CanvasPin[] {
+  const cleared = existing.filter((p) => !isAutoBoundCanvasPin(p));
+  return upsertBoundTowerAsCards(cleared, tower, dismissedIds, {
+    maxCards,
+    addMissing: true,
+  });
+}
+
 export function questionTowerHideKey(
-  tower: Pick<PlantTowerPayload, "mode" | "role" | "questionIndex" | "source" | "deck">
+  tower: Pick<PlantTowerPayload, "mode" | "role" | "questionIndex" | "source" | "deck" | "cards">
 ) {
+  if (tower.source === "selected") {
+    const types = (tower.cards ?? []).map((c) => c.type).join("+");
+    return `selected:${tower.role}:d${tower.deck ?? 0}:${types}`;
+  }
   if (tower.source === "role-default") {
     return `role-default:${tower.role}:d${tower.deck ?? 0}`;
   }

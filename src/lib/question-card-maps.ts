@@ -46,9 +46,8 @@ function entry(
   };
 }
 
-/** Locked Q1 demo maps (user-specified Lovable visuals):
- *  Finance Q1 → Visual 1 · Maintenance Q1 → Visual 5 · Safety Q1 → Visual 12
- *  Engineer Q1 → Visual 11 (Replit wind pack → hydro/steam plant tags)
+/** Eval fixtures only — golden expected card types for the 15 starter strings.
+ * Runtime selection uses `rankSelectVisuals` / `selectVisuals` (not these maps).
  */
 export const QUESTION_CARD_MAPS: QuestionCardMap[] = [
   // Overview

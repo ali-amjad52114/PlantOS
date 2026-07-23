@@ -15,6 +15,7 @@ import { LovableCardView } from "@/components/lovable-viz/LovableCardView";
 import { PlantTowerGrid } from "@/components/plant-tower-grid";
 import { Visualization } from "@/components/visualization";
 import {
+  getChatFirstAskDone,
   newChatId,
   removeChatSession,
   resolveChatIdForMode,
@@ -24,6 +25,7 @@ import {
   type StoredChat,
 } from "@/lib/chat-sessions";
 import { cardDraftFromTower, chatPinSourceKey, questionTowerHideKey, type CanvasPinDraft } from "@/lib/canvas-pins";
+import { chatAnswerReady } from "@/lib/chat-answer-ready";
 import { normalizeSpec } from "@/lib/catalog";
 import {
   CHAT_DEFAULT_CHART_LIMIT,
@@ -72,13 +74,22 @@ export function PlantChat({
   fixtureTower = null,
   movedPinKeys,
   autoHiddenTowerKey = null,
+  allowChatCharts = false,
+  onFollowUpChatAsk,
   onChatSessionReset,
+  onActiveChatChange,
   e2eFirstAsk = false,
   e2eFirstAskBlurb = false,
   e2eFollowUpTower = null,
   sessionFirstAskDone = false,
+  chatAnswerReadyFlag = false,
+  onChatAnswerGate,
+  e2eAnswerGate = false,
+  e2eAnswerGateBlurb = false,
   onE2eSimFirstAsk,
   onE2eSimFollowUp,
+  onE2eAnswerGatePrepare,
+  onE2eAnswerGateAnswer,
 }: {
   role: Role;
   /** Persona this chat pane belongs to — sessions are filtered by this. */
@@ -108,14 +119,33 @@ export function PlantChat({
   movedPinKeys?: ReadonlySet<string>;
   /** First-ask auto-landed tower key (`mode:qN` or `role-default-first`) — hide in chat. */
   autoHiddenTowerKey?: string | null;
+  /**
+   * False during first ask (and until a follow-up starts): hide towers/viz in chat.
+   * True after a follow-up ask begins — new messages may show charts.
+   */
+  allowChatCharts?: boolean;
+  /** Typed Ask in chat after first ask completed — enable follow-up chart-in-chat. */
+  onFollowUpChatAsk?: () => void;
   /** New chat / session switch — reset first-ask placement. */
   onChatSessionReset?: () => void;
+  /** Persona chat became active — load that chat's first-ask flag (isolated per mode). */
+  onActiveChatChange?: (info: {
+    mode: string;
+    chatId: string;
+    firstAskDone: boolean;
+  }) => void;
   e2eFirstAsk?: boolean;
   e2eFirstAskBlurb?: boolean;
   e2eFollowUpTower?: PlantTowerPayload | null;
   sessionFirstAskDone?: boolean;
+  chatAnswerReadyFlag?: boolean;
+  onChatAnswerGate?: (ready: boolean, chatMode: string) => void;
+  e2eAnswerGate?: boolean;
+  e2eAnswerGateBlurb?: boolean;
   onE2eSimFirstAsk?: () => void | Promise<void>;
   onE2eSimFollowUp?: () => void | Promise<void>;
+  onE2eAnswerGatePrepare?: () => void | Promise<void>;
+  onE2eAnswerGateAnswer?: () => void | Promise<void>;
 }) {
   const [sessions, setSessions] = useState<StoredChat[]>([]);
   const [chatId, setChatId] = useState(() => newChatId());
@@ -205,13 +235,22 @@ export function PlantChat({
       fixtureTower={fixtureTower}
       movedPinKeys={movedPinKeys}
       autoHiddenTowerKey={autoHiddenTowerKey}
+      allowChatCharts={allowChatCharts}
+      onFollowUpChatAsk={onFollowUpChatAsk}
       e2eFirstAsk={e2eFirstAsk}
       e2eFirstAskBlurb={e2eFirstAskBlurb}
       e2eFollowUpTower={e2eFollowUpTower}
       sessionFirstAskDone={sessionFirstAskDone}
+      chatAnswerReadyFlag={chatAnswerReadyFlag}
+      onChatAnswerGate={onChatAnswerGate}
+      e2eAnswerGate={e2eAnswerGate}
+      e2eAnswerGateBlurb={e2eAnswerGateBlurb}
       onE2eSimFirstAsk={onE2eSimFirstAsk}
       onE2eSimFollowUp={onE2eSimFollowUp}
+      onE2eAnswerGatePrepare={onE2eAnswerGatePrepare}
+      onE2eAnswerGateAnswer={onE2eAnswerGateAnswer}
       onChatSessionReset={onChatSessionReset}
+      onActiveChatChange={onActiveChatChange}
     />
   );
 }
@@ -241,13 +280,22 @@ function ChatSession({
   fixtureTower,
   movedPinKeys,
   autoHiddenTowerKey,
+  allowChatCharts,
+  onFollowUpChatAsk,
   e2eFirstAsk,
   e2eFirstAskBlurb,
   e2eFollowUpTower,
   sessionFirstAskDone,
+  chatAnswerReadyFlag,
+  onChatAnswerGate,
+  e2eAnswerGate,
+  e2eAnswerGateBlurb,
   onE2eSimFirstAsk,
   onE2eSimFollowUp,
+  onE2eAnswerGatePrepare,
+  onE2eAnswerGateAnswer,
   onChatSessionReset,
+  onActiveChatChange,
 }: {
   chatId: string;
   role: Role;
@@ -273,13 +321,26 @@ function ChatSession({
   fixtureTower?: PlantTowerPayload | null;
   movedPinKeys?: ReadonlySet<string>;
   autoHiddenTowerKey?: string | null;
+  allowChatCharts?: boolean;
+  onFollowUpChatAsk?: () => void;
   e2eFirstAsk?: boolean;
   e2eFirstAskBlurb?: boolean;
   e2eFollowUpTower?: PlantTowerPayload | null;
   sessionFirstAskDone?: boolean;
+  chatAnswerReadyFlag?: boolean;
+  onChatAnswerGate?: (ready: boolean, chatMode: string) => void;
+  e2eAnswerGate?: boolean;
+  e2eAnswerGateBlurb?: boolean;
   onE2eSimFirstAsk?: () => void | Promise<void>;
   onE2eSimFollowUp?: () => void | Promise<void>;
+  onE2eAnswerGatePrepare?: () => void | Promise<void>;
+  onE2eAnswerGateAnswer?: () => void | Promise<void>;
   onChatSessionReset?: () => void;
+  onActiveChatChange?: (info: {
+    mode: string;
+    chatId: string;
+    firstAskDone: boolean;
+  }) => void;
 }) {
   const transport = useTriggerChatTransport<typeof plantAgent>({
     task: "plantos-agent",
@@ -294,6 +355,31 @@ function ChatSession({
   });
   const [input, setInput] = useState("");
   const busy = status === "submitted" || status === "streaming";
+  /** Message ids from before the first follow-up — keep their charts off chat forever. */
+  const [firstAskFrozenMessageIds, setFirstAskFrozenMessageIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const prevAllowChatCharts = useRef(Boolean(allowChatCharts));
+
+  useEffect(() => {
+    onActiveChatChange?.({
+      mode,
+      chatId,
+      firstAskDone: getChatFirstAskDone(chatId),
+    });
+  }, [mode, chatId, onActiveChatChange]);
+
+  useEffect(() => {
+    if (!allowChatCharts) {
+      setFirstAskFrozenMessageIds(new Set());
+      prevAllowChatCharts.current = false;
+      return;
+    }
+    if (!prevAllowChatCharts.current) {
+      setFirstAskFrozenMessageIds(new Set(messages.map((m) => m.id)));
+    }
+    prevAllowChatCharts.current = true;
+  }, [allowChatCharts, messages]);
 
   const onToolVisualRef = useRef(onToolVisual);
   onToolVisualRef.current = onToolVisual;
@@ -341,6 +427,7 @@ function ChatSession({
     const trimmed = text.trim();
     if (!trimmed) return;
     const kick = () => {
+      onFollowUpChatAsk?.();
       rememberSession(trimmed);
       sendMessage({ text: trimmed });
       setInput("");
@@ -410,6 +497,17 @@ function ChatSession({
     lastBusy.current = busy;
     onAgentBusyChange?.(busy, mode);
   }, [busy, mode, onAgentBusyChange]);
+
+  useEffect(() => {
+    if (!onChatAnswerGate) return;
+    const sinceUserMessageId = [...messages].reverse().find((m) => m.role === "user")?.id;
+    const ready = chatAnswerReady({
+      messages: messages as Array<{ id: string; role: string; parts?: Array<{ type: string; text?: string }> }>,
+      status,
+      sinceUserMessageId,
+    });
+    onChatAnswerGate(ready, mode);
+  }, [messages, status, mode, onChatAnswerGate]);
 
   useEffect(() => {
     if (lastStreamKey.current === streamProgressKey) return;
@@ -496,7 +594,7 @@ function ChatSession({
           <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-1.5">
             {sessions.length === 0 && (
               <p className="px-1 py-2 text-[11px] text-muted-foreground">
-                No {mode} chats yet
+                No {mode} chats yet — starters here stay under this persona only
               </p>
             )}
             {sessions.map((s) => {
@@ -565,6 +663,38 @@ function ChatSession({
                   E2E follow-up
                 </button>
               </div>
+            )}
+            {e2eAnswerGate && (
+              <div
+                className="flex flex-wrap gap-2"
+                data-testid="e2e-answer-gate-controls"
+                data-answer-ready={chatAnswerReadyFlag ? "1" : "0"}
+              >
+                <button
+                  type="button"
+                  data-testid="e2e-answer-gate-prepare"
+                  onClick={() => void onE2eAnswerGatePrepare?.()}
+                  className="rounded-lg border border-border bg-surface-2 px-2 py-1 text-[11px] font-medium"
+                >
+                  E2E idle w/o answer
+                </button>
+                <button
+                  type="button"
+                  data-testid="e2e-answer-gate-answer"
+                  onClick={() => void onE2eAnswerGateAnswer?.()}
+                  className="rounded-lg border border-border bg-surface-2 px-2 py-1 text-[11px] font-medium"
+                >
+                  E2E inject answer
+                </button>
+              </div>
+            )}
+            {e2eAnswerGateBlurb && (
+              <p
+                data-testid="e2e-answer-gate-blurb"
+                className="rounded-xl border border-border/70 bg-surface-2/50 px-3 py-2.5 text-[13px] leading-relaxed text-foreground/90"
+              >
+                Hydro feed and energy look steady — canvas charts should land only after this answer.
+              </p>
             )}
             {e2eFirstAskBlurb && (
               <p
@@ -661,6 +791,9 @@ function ChatSession({
                   onPinVisual={onPinVisual}
                   movedPinKeys={movedPinKeys}
                   autoHiddenTowerKey={autoHiddenTowerKey}
+                  hideChatCharts={
+                    !allowChatCharts || firstAskFrozenMessageIds.has(m.id)
+                  }
                 />
                 {busy &&
                   chatWaitView &&
@@ -905,12 +1038,15 @@ function Message({
   onPinVisual,
   movedPinKeys,
   autoHiddenTowerKey,
+  hideChatCharts = false,
 }: {
   message: UIMessage;
   hideTowers?: boolean;
   onPinVisual?: (draft: CanvasPinDraft) => void;
   movedPinKeys?: ReadonlySet<string>;
   autoHiddenTowerKey?: string | null;
+  /** First-ask policy: hide towers/viz for this message (blurb only). */
+  hideChatCharts?: boolean;
 }) {
   if (message.role === "user") {
     return (
@@ -927,9 +1063,22 @@ function Message({
   let lastVizIndex = -1;
   let lastTowerIndex = -1;
   let lastToolIndex = -1;
+  let findingsKeys: string[] | null = null;
   message.parts.forEach((p, i) => {
     if (p.type === "tool-renderVisualization") lastVizIndex = i;
-    if (p.type === "data-plant-tower") lastTowerIndex = i;
+    if (p.type === "data-plant-tower") {
+      lastTowerIndex = i;
+      const keys = (p as { data?: { findingsKeys?: string[] } }).data?.findingsKeys;
+      if (keys?.length) findingsKeys = keys;
+    }
+    if (p.type === "data-visual-selection") {
+      const keys = (p as { data?: { findingsKeys?: string[] } }).data?.findingsKeys;
+      if (keys?.length) findingsKeys = keys;
+    }
+    if (p.type === "tool-selectVisuals") {
+      const out = (p as { output?: { findingsKeys?: string[] } }).output;
+      if (out?.findingsKeys?.length) findingsKeys = out.findingsKeys;
+    }
     if (isToolPart(p.type)) lastToolIndex = i;
   });
 
@@ -941,6 +1090,7 @@ function Message({
           if (hideTowers || i !== lastTowerIndex) return null;
         }
         if (part.type === "data-investigation-step") return null;
+        if (part.type === "data-visual-selection") return null;
         // Drop "I'll investigate…" preamble — keep only the takeaway after tools.
         if (part.type === "text" && lastToolIndex >= 0 && i < lastToolIndex) return null;
         const key = (part as any).toolCallId ?? `${part.type}-${i}`;
@@ -952,6 +1102,8 @@ function Message({
             onPinVisual={onPinVisual}
             movedPinKeys={movedPinKeys}
             autoHiddenTowerKey={autoHiddenTowerKey}
+            hideChatCharts={hideChatCharts}
+            findingsKeys={findingsKeys}
           />
         );
       })}
@@ -965,12 +1117,16 @@ function MessagePart({
   onPinVisual,
   movedPinKeys,
   autoHiddenTowerKey,
+  hideChatCharts = false,
+  findingsKeys,
 }: {
   part: UIMessage["parts"][number];
   messageId: string;
   onPinVisual?: (draft: CanvasPinDraft) => void;
   movedPinKeys?: ReadonlySet<string>;
   autoHiddenTowerKey?: string | null;
+  hideChatCharts?: boolean;
+  findingsKeys?: string[] | null;
 }) {
   if (part.type === "text") {
     const text = String(part.text || "").trim();
@@ -1016,11 +1172,12 @@ function MessagePart({
   if (part.type === "data-plant-tower") {
     const tower = (part as { data?: PlantTowerPayload }).data;
     if (!tower?.cards?.length) return null;
+    // First ask: charts live on the canvas only — never echo the agent tower in chat.
+    if (hideChatCharts) return null;
     if (
       autoHiddenTowerKey &&
       questionTowerHideKey(tower) === autoHiddenTowerKey
     ) {
-      // First ask: charts are on the canvas — blurb stays in text parts only.
       return null;
     }
     const chatCards = tower.cards.slice(0, CHAT_DEFAULT_CHART_LIMIT);
@@ -1028,9 +1185,6 @@ function MessagePart({
     if (!onPinVisual) return <PlantTowerGrid tower={slimTower} />;
     return (
       <div className="space-y-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Lovable Visual {tower.deck} · {tower.deckName} — pin to canvas
-        </p>
         {chatCards.map((card) => {
           const draft = cardDraftFromTower(tower, card, messageId);
           return (
@@ -1061,6 +1215,7 @@ function MessagePart({
     const spec = p.state === "input-streaming" ? null : normalizeSpec(input?.spec);
     if (!spec) return null;
     if (output && output.ok === false) return null;
+    if (hideChatCharts) return null;
     const draft: CanvasPinDraft = {
       kind: "viz",
       sourceMessageId: messageId,
@@ -1088,6 +1243,8 @@ function MessagePart({
         messageId={messageId}
         onPinVisual={onPinVisual}
         movedPinKeys={movedPinKeys}
+        findingsKeys={findingsKeys}
+        blurbOnly={hideChatCharts}
       />
     );
   }
@@ -1101,6 +1258,8 @@ function MessagePart({
         messageId={messageId}
         onPinVisual={onPinVisual}
         movedPinKeys={movedPinKeys}
+        findingsKeys={findingsKeys}
+        blurbOnly={hideChatCharts}
       />
     );
   }
@@ -1114,6 +1273,23 @@ function MessagePart({
         messageId={messageId}
         onPinVisual={onPinVisual}
         movedPinKeys={movedPinKeys}
+        findingsKeys={findingsKeys}
+        blurbOnly={hideChatCharts}
+      />
+    );
+  }
+  if (part.type === "tool-selectVisuals") {
+    if (hideChatCharts) return null;
+    const spinning = (part as any).state !== "output-available";
+    const out = (part as any).output as { cardTypes?: string[]; rationale?: string } | undefined;
+    return (
+      <ToolStatus
+        label={
+          spinning
+            ? "Selecting visuals…"
+            : `Visuals · ${(out?.cardTypes ?? []).join(", ") || "ready"}`
+        }
+        spinning={spinning}
       />
     );
   }
@@ -1137,6 +1313,8 @@ function InvestigateBlock({
   messageId,
   onPinVisual,
   movedPinKeys,
+  findingsKeys,
+  blurbOnly = false,
 }: {
   label: string;
   spinning?: boolean;
@@ -1145,6 +1323,9 @@ function InvestigateBlock({
   messageId?: string;
   onPinVisual?: (draft: CanvasPinDraft) => void;
   movedPinKeys?: ReadonlySet<string>;
+  findingsKeys?: string[] | null;
+  /** First ask: compact findings strip only — no pinable cards (those go on canvas). */
+  blurbOnly?: boolean;
 }) {
   if (spinning || !output) {
     return (
@@ -1156,8 +1337,21 @@ function InvestigateBlock({
         {spinning ? (
           <p className="px-3 py-2 text-xs text-muted-foreground">Querying ClickHouse…</p>
         ) : (
-          <FindingsBody kind={kind} data={output} />
+          <FindingsBody kind={kind} data={output} findingsKeys={findingsKeys} />
         )}
+      </div>
+    );
+  }
+
+  // First ask: keep a compact readings strip in chat; never "pin each" / Move-to-canvas stacks.
+  if (blurbOnly) {
+    return (
+      <div className="overflow-hidden rounded-xl border border-border/80 bg-surface">
+        <div className="flex items-center gap-1.5 border-b border-border/60 bg-surface-2/60 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="text-primary">✓</span>
+          {label} findings
+        </div>
+        <FindingsBody kind={kind} data={output} findingsKeys={findingsKeys} />
       </div>
     );
   }
@@ -1214,7 +1408,7 @@ function InvestigateBlock({
         <span className="text-primary">✓</span>
         {label} findings
       </div>
-      <FindingsBody kind={kind} data={output} />
+      <FindingsBody kind={kind} data={output} findingsKeys={findingsKeys} />
     </div>
   );
   if (!onPinVisual) return body;

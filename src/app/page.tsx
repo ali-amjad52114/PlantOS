@@ -20,7 +20,9 @@ import {
   createPin,
   expandTowerIntoCardPins,
   FIRST_ASK_CANVAS_CARD_COUNT,
+  isAutoBoundCanvasPin,
   questionTowerHideKey,
+  replaceFirstAskCanvasPins,
   upsertBoundTowerAsCards,
   type CanvasPin,
   type CanvasPinDraft,
@@ -34,8 +36,18 @@ import {
 import { defaultPlantTower, type PlantTowerPayload } from "@/lib/plant-tower";
 import { resolveQuestionIndex } from "@/lib/question-card-maps";
 import { MODE_QUESTIONS } from "@/lib/shell-prompts";
+import { markChatFirstAskDone } from "@/lib/chat-sessions";
 
 type AgentRole = "engineer" | "operations" | "finance";
+
+type PersonaBag = {
+  canvasPins: CanvasPin[];
+  movedChatPinKeys: string[];
+  firstAskDone: boolean;
+  allowChatCharts: boolean;
+  autoHiddenTowerKey: string | null;
+  dismissedPinIds: string[];
+};
 
 async function readJson(res: Response) {
   const text = await res.text();
@@ -109,16 +121,40 @@ export default function PlantOSPage() {
   chBindingRef.current = chBinding;
   const [e2eCanvas, setE2eCanvas] = useState(false);
   const [e2eFirstAsk, setE2eFirstAsk] = useState(false);
+  const [e2eAnswerGate, setE2eAnswerGate] = useState(false);
   /** Per chat session: first ask already placed (or completed without cards). */
   const sessionFirstAskDoneRef = useRef(false);
   const [sessionFirstAskDone, setSessionFirstAskDone] = useState(false);
   /** Hide this question-map tower in chat after first-ask auto-land (`mode:qN`). */
   const [autoHiddenTowerKey, setAutoHiddenTowerKey] = useState<string | null>(null);
+  /**
+   * First ask: charts stay off chat. Flip true when a follow-up ask starts
+   * so new messages can show charts (first-ask message ids stay suppressed in chat).
+   */
+  const [allowChatCharts, setAllowChatCharts] = useState(false);
+  /** PLAN_ANSWER_BEFORE_CANVAS — chat takeaway visible + stream idle. */
+  const chatAnswerReadyRef = useRef(false);
+  const [chatAnswerReadyFlag, setChatAnswerReadyFlag] = useState(false);
+  /** Busy ended (or hang) but answer not ready yet — reveal when gate opens. */
+  const revealWhenAnswerReadyRef = useRef(false);
   /** E2E: follow-up charts shown in chat only (no auto canvas). */
   const [e2eFollowUpTower, setE2eFollowUpTower] = useState<PlantTowerPayload | null>(null);
   const [e2eFirstAskBlurb, setE2eFirstAskBlurb] = useState(false);
+  const [e2eAnswerGateBlurb, setE2eAnswerGateBlurb] = useState(false);
   /** Pins the user removed — live CH refresh must not resurrect them. */
   const dismissedPinIdsRef = useRef<Set<string>>(new Set());
+  /** Per-persona canvas / first-ask bag — chats and placement are NOT shared across modes. */
+  const personaBagRef = useRef<Partial<Record<ShellMode, PersonaBag>>>({});
+  const canvasPinsRef = useRef<CanvasPin[]>([]);
+  canvasPinsRef.current = canvasPins;
+  const movedKeysRef = useRef<Set<string>>(movedChatPinKeys);
+  movedKeysRef.current = movedChatPinKeys;
+  const allowChatChartsRef = useRef(allowChatCharts);
+  allowChatChartsRef.current = allowChatCharts;
+  const autoHiddenTowerKeyRef = useRef(autoHiddenTowerKey);
+  autoHiddenTowerKeyRef.current = autoHiddenTowerKey;
+  /** Active Trigger/UI chat id for the current persona (from PlantChat). */
+  const activeChatIdRef = useRef<string | null>(null);
   const askBridgeRef = useRef<((q: string) => void) | null>(null);
   const modeRef = useRef<ShellMode>(mode);
   modeRef.current = mode;
@@ -141,28 +177,88 @@ export default function PlantOSPage() {
       const params = new URLSearchParams(window.location.search);
       setE2eCanvas(params.get("e2eCanvas") === "1");
       setE2eFirstAsk(params.get("e2eFirstAsk") === "1");
+      setE2eAnswerGate(params.get("e2eAnswerGate") === "1");
     } catch {
       setE2eCanvas(false);
       setE2eFirstAsk(false);
+      setE2eAnswerGate(false);
     }
   }, []);
+
+  const snapshotPersonaBag = useCallback((m: ShellMode) => {
+    personaBagRef.current[m] = {
+      canvasPins: canvasPinsRef.current,
+      movedChatPinKeys: [...movedKeysRef.current],
+      firstAskDone: sessionFirstAskDoneRef.current,
+      allowChatCharts: allowChatChartsRef.current,
+      autoHiddenTowerKey: autoHiddenTowerKeyRef.current,
+      dismissedPinIds: [...dismissedPinIdsRef.current],
+    };
+  }, []);
+
+  const restorePersonaBag = useCallback((m: ShellMode) => {
+    const bag = personaBagRef.current[m];
+    if (!bag) {
+      sessionFirstAskDoneRef.current = false;
+      setSessionFirstAskDone(false);
+      setAllowChatCharts(false);
+      setAutoHiddenTowerKey(null);
+      setCanvasPins([]);
+      setMovedChatPinKeys(new Set());
+      dismissedPinIdsRef.current = new Set();
+      return;
+    }
+    sessionFirstAskDoneRef.current = bag.firstAskDone;
+    setSessionFirstAskDone(bag.firstAskDone);
+    setAllowChatCharts(bag.allowChatCharts);
+    setAutoHiddenTowerKey(bag.autoHiddenTowerKey);
+    setCanvasPins(bag.canvasPins);
+    setMovedChatPinKeys(new Set(bag.movedChatPinKeys));
+    dismissedPinIdsRef.current = new Set(bag.dismissedPinIds);
+  }, []);
+
+  const applyChatPlacementFlags = useCallback((chatId: string | null, firstAskDone: boolean) => {
+    activeChatIdRef.current = chatId;
+    sessionFirstAskDoneRef.current = firstAskDone;
+    setSessionFirstAskDone(firstAskDone);
+    setAllowChatCharts(false);
+    // Follow-up charts only after a later ask in THIS chat — not because another persona asked.
+    if (!firstAskDone) {
+      setAutoHiddenTowerKey(null);
+    }
+  }, []);
+
+  const onActiveChatChange = useCallback(
+    ({ chatId, firstAskDone }: { chatId: string; firstAskDone: boolean }) => {
+      applyChatPlacementFlags(chatId, firstAskDone);
+    },
+    [applyChatPlacementFlags]
+  );
 
   const resetChatSessionFirstAsk = useCallback(() => {
     sessionFirstAskDoneRef.current = false;
     setSessionFirstAskDone(false);
     setAutoHiddenTowerKey(null);
+    setAllowChatCharts(false);
+    chatAnswerReadyRef.current = false;
+    setChatAnswerReadyFlag(false);
+    revealWhenAnswerReadyRef.current = false;
     setE2eFollowUpTower(null);
     setE2eFirstAskBlurb(false);
+    setE2eAnswerGateBlurb(false);
+    // New chat in this persona: clear this persona's auto-landed pins only.
+    setCanvasPins((prev) => prev.filter((p) => !isAutoBoundCanvasPin(p)));
+    const id = activeChatIdRef.current;
+    if (id) markChatFirstAskDone(id, false);
   }, []);
 
   const landFirstAskTower = useCallback((tower: PlantTowerPayload) => {
     setCanvasPins((prev) =>
-      upsertBoundTowerAsCards(prev, tower, dismissedPinIdsRef.current, {
-        maxCards: FIRST_ASK_CANVAS_CARD_COUNT,
-        addMissing: true,
-      })
+      replaceFirstAskCanvasPins(prev, tower, dismissedPinIdsRef.current, FIRST_ASK_CANVAS_CARD_COUNT)
     );
     setAutoHiddenTowerKey(questionTowerHideKey(tower));
+    const id = activeChatIdRef.current;
+    if (id) markChatFirstAskDone(id, true);
   }, []);
 
   const markChatVisualMoved = useCallback((draft: CanvasPinDraft) => {
@@ -311,15 +407,34 @@ export default function PlantOSPage() {
     return () => clearInterval(id);
   }, [playing, feedActive, refreshLive, refreshOverview]);
 
-  // Re-bind persona question cards from CH while the feed is moving.
-  const boundQ = tower?.source === "question-map" ? tower.questionIndex : null;
+  // Re-bind selected cards from CH while the feed is moving.
+  const boundCardTypesKey =
+    tower?.cards?.length && (tower.source === "selected" || tower.source === "question-map")
+      ? tower.cards.map((c) => c.type).join(",")
+      : null;
+  const towerBindRef = useRef(tower);
+  towerBindRef.current = tower;
   useEffect(() => {
     if (!playing && replayProgress.status !== "running") return;
-    if (boundQ == null) return;
+    if (!boundCardTypesKey) return;
     let cancelled = false;
     const pull = async () => {
+      const t = towerBindRef.current;
+      if (!t?.cards?.length) return;
       try {
-        const r = await fetch(`/api/plant/bound-tower?mode=${mode}&q=${boundQ}`);
+        const r = await fetch("/api/plant/bound-tower", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cardTypes: t.cards.map((c) => c.type),
+            role: t.role,
+            mode,
+            question: t.question,
+            findingsKeys: t.findingsKeys,
+            deck: t.deck,
+            deckName: t.deckName,
+          }),
+        });
         const payload = await readJson(r);
         if (cancelled || payload?.error) return;
         setTower(payload);
@@ -345,7 +460,7 @@ export default function PlantOSPage() {
     replayProgress.insertedRows,
     replayProgress.tickIndex,
     mode,
-    boundQ,
+    boundCardTypesKey,
   ]);
 
   useEffect(() => {
@@ -493,20 +608,13 @@ export default function PlantOSPage() {
       heldTowerRef.current = t;
       return;
     }
-    // PLAN_CHAT_CANVAS_PINS: agent role-default towers stay in chat for user pinning.
+    // role-default towers stay in chat for pinning; selected towers update stage.
     if (t.source === "role-default") return;
     const current = modeRef.current;
     const storeMode: ShellMode =
       current === "overview" ? (t.role as ShellMode) : current;
-    setTowersByMode((prev) => {
-      const existing = prev[storeMode];
-      if (existing?.source === "question-map" && t.source === "role-default") return prev;
-      return { ...prev, [storeMode]: t };
-    });
-    setTower((prev) => {
-      if (prev?.source === "question-map" && t.source === "role-default") return prev;
-      return t;
-    });
+    setTowersByMode((prev) => ({ ...prev, [storeMode]: t }));
+    setTower(t);
     setMobileTab("visuals");
   }, []);
 
@@ -545,51 +653,51 @@ export default function PlantOSPage() {
       }
     };
 
-    // Unmapped ask: Trigger finished — apply held agent visuals; first ask may land ≤2 tower cards.
-    if (pending.q == null) {
-      const heldTower = heldTowerRef.current;
-      heldTowerRef.current = null;
-      const isFirst = !sessionFirstAskDoneRef.current;
-      sessionFirstAskDoneRef.current = true;
-      setSessionFirstAskDone(true);
-      if (isFirst && heldTower?.cards?.length) {
-        landFirstAskTower(heldTower);
-      }
-      flushHeldVisual(modeRef.current === "overview" ? "engineer" : modeRef.current);
-      setChBinding(false);
-      setStageProgress(null);
-      setAwaitingQuestion(null);
-      setAwaitingMode(null);
-      setTriggerWait(null);
-      setWaitStartedAt(null);
-      return;
-    }
+    const storeMode: ShellMode =
+      pending.mode === "overview" ? "engineer" : pending.mode;
+    const heldForBind = heldTowerRef.current;
+    heldTowerRef.current = null;
 
     setStageProgress({
       percentage: 92,
       label: "Binding live ClickHouse cards…",
-      steps: [
-        { id: "binding", label: "Bind CH", done: false, active: true },
-      ],
+      steps: [{ id: "binding", label: "Bind CH", done: false, active: true }],
     });
 
     try {
-      const r = await fetch(`/api/plant/bound-tower?mode=${pending.mode}&q=${pending.q}`);
+      const role =
+        pending.mode === "finance"
+          ? "finance"
+          : pending.mode === "operations"
+            ? "operations"
+            : "engineer";
+      const r = await fetch("/api/plant/bound-tower", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cardTypes: heldForBind?.cards?.map((c) => c.type),
+          role: heldForBind?.role ?? role,
+          mode: pending.mode,
+          question: pending.question,
+          findingsKeys: heldForBind?.findingsKeys,
+          deck: heldForBind?.deck,
+          deckName: heldForBind?.deckName,
+        }),
+      });
       const payload = await readJson(r);
       if (payload?.error) throw new Error(payload.error);
 
-      heldTowerRef.current = null;
       setTower(payload);
       setTowersByMode((prev) => ({ ...prev, [pending.mode]: payload }));
 
       const isFirst = !sessionFirstAskDoneRef.current;
       sessionFirstAskDoneRef.current = true;
       setSessionFirstAskDone(true);
+      const chatId = activeChatIdRef.current;
+      if (chatId) markChatFirstAskDone(chatId, true);
       if (isFirst) {
-        // First ask: exactly 2 question-map cards on canvas; none in chat.
         landFirstAskTower(payload as PlantTowerPayload);
       } else {
-        // Follow-up: refresh bindings on existing pins only — no auto-land.
         setCanvasPins((prev) =>
           upsertBoundTowerAsCards(
             prev,
@@ -600,7 +708,7 @@ export default function PlantOSPage() {
         );
       }
 
-      flushHeldVisual(pending.mode);
+      flushHeldVisual(storeMode);
       setError(null);
       setChBinding(false);
 
@@ -626,7 +734,7 @@ export default function PlantOSPage() {
             detailLines: [
               "chat.createStartSessionAction · realtime token",
               "streamText · toStreamTextOptions",
-              "onTurnComplete · turn audit",
+              "selectVisuals · catalog rank",
               "post-run ClickHouse bind",
             ],
           },
@@ -656,7 +764,11 @@ export default function PlantOSPage() {
       setTriggerWait(null);
       setWaitStartedAt(null);
       heldVisualRef.current = null;
-      heldTowerRef.current = null;
+      if (heldForBind?.cards?.length && !sessionFirstAskDoneRef.current) {
+        sessionFirstAskDoneRef.current = true;
+        setSessionFirstAskDone(true);
+        landFirstAskTower(heldForBind);
+      }
     }
   }, [landFirstAskTower, waitStartedAt]);
 
@@ -684,55 +796,80 @@ export default function PlantOSPage() {
   }, []);
 
   const revealInFlight = useRef(false);
+
+  const tryRevealBoundTower = useCallback(() => {
+    if (!awaitingBindRef.current) return;
+    if (!chatAnswerReadyRef.current) {
+      // Stream idle (or hang) but takeaway not visible yet — wait for answer gate.
+      revealWhenAnswerReadyRef.current = true;
+      return;
+    }
+    if (revealInFlight.current) return;
+    revealWhenAnswerReadyRef.current = false;
+    revealInFlight.current = true;
+    void revealBoundTower().finally(() => {
+      revealInFlight.current = false;
+    });
+  }, [revealBoundTower]);
+
+  const onChatAnswerGate = useCallback(
+    (ready: boolean, chatMode: string) => {
+      if (awaitingBindRef.current && awaitingBindRef.current.mode !== chatMode) return;
+      chatAnswerReadyRef.current = ready;
+      setChatAnswerReadyFlag(ready);
+      if (ready && revealWhenAnswerReadyRef.current) {
+        tryRevealBoundTower();
+      }
+    },
+    [tryRevealBoundTower]
+  );
+
   const onAgentBusyChange = useCallback(
     (busy: boolean, chatMode: string) => {
       const pending = awaitingBindRef.current;
       if (!pending || pending.mode !== chatMode) return;
       if (busy) {
         awaitingBindRef.current = { ...pending, sawBusy: true };
+        chatAnswerReadyRef.current = false;
+        setChatAnswerReadyFlag(false);
         return;
       }
-      // Only reveal after this ask actually ran on Trigger (busy flipped true → false).
-      if (pending.sawBusy && !revealInFlight.current) {
-        revealInFlight.current = true;
-        void revealBoundTower().finally(() => {
-          revealInFlight.current = false;
-        });
+      // Trigger idle — only land canvas after chat answer is ready.
+      if (pending.sawBusy) {
+        tryRevealBoundTower();
       }
     },
-    [revealBoundTower]
+    [tryRevealBoundTower]
   );
 
   const onAgentError = useCallback(
-    (message: string, chatMode: string) => {
-      // Don't paint the whole shell red — cards can still demo from ClickHouse.
+    (_message: string, chatMode: string) => {
       const pending = awaitingBindRef.current;
-      if (!pending || pending.mode !== chatMode || revealInFlight.current) return;
-      revealInFlight.current = true;
-      void revealBoundTower().finally(() => {
-        revealInFlight.current = false;
-      });
+      if (!pending || pending.mode !== chatMode) return;
+      // Queue reveal; still require answer gate (do not dump cards on error alone).
+      tryRevealBoundTower();
     },
-    [revealBoundTower]
+    [tryRevealBoundTower]
   );
 
-  // If Trigger/OpenAI hangs, don't leave the stage empty forever.
+  // Hang: keep waiting UI — do not dump CH cards before the chat answer exists.
   useEffect(() => {
     if (!awaitingMode || !awaitingQuestion) return;
     const t = window.setTimeout(() => {
-      if (!awaitingBindRef.current || revealInFlight.current) return;
+      if (!awaitingBindRef.current) return;
       setError(
-        "Agent still waiting on Trigger/OpenAI — showing ClickHouse cards so the demo can continue."
+        "Agent still waiting on Trigger/OpenAI — charts will land after the chat answer appears."
       );
-      revealInFlight.current = true;
-      void revealBoundTower().finally(() => {
-        revealInFlight.current = false;
-      });
+      revealWhenAnswerReadyRef.current = true;
     }, 12000);
     return () => window.clearTimeout(t);
-  }, [awaitingMode, awaitingQuestion, revealBoundTower]);
+  }, [awaitingMode, awaitingQuestion]);
 
   function onModeChange(next: ShellMode) {
+    const prev = modeRef.current;
+    if (prev !== next) {
+      snapshotPersonaBag(prev);
+    }
     setMode(next);
     const ar = agentRoleForMode(next);
     setRole(ar);
@@ -747,6 +884,9 @@ export default function PlantOSPage() {
       setWaitStartedAt(null);
       setChBinding(false);
     }
+    if (prev !== next) {
+      restorePersonaBag(next);
+    }
     if (next === "overview") {
       setData(null);
       setTower(towersByMode.overview ?? null);
@@ -759,6 +899,18 @@ export default function PlantOSPage() {
   function askQuestion(question: string) {
     setError(null);
     setMobileTab("visuals");
+    // Follow-up in this session → charts may appear in chat (first-ask visuals stay suppressed).
+    if (sessionFirstAskDoneRef.current) {
+      setAllowChatCharts(true);
+    } else {
+      // First ask of this chat: clear leftover auto pins so canvas cannot show a prior persona's charts.
+      setCanvasPins((prev) => prev.filter((p) => !isAutoBoundCanvasPin(p)));
+      setAutoHiddenTowerKey(null);
+      setAllowChatCharts(false);
+    }
+    chatAnswerReadyRef.current = false;
+    setChatAnswerReadyFlag(false);
+    revealWhenAnswerReadyRef.current = false;
     const idx = resolveQuestionIndex(mode, question);
 
     // Fresh ask may land bound cards again even if user deleted them earlier.
@@ -828,6 +980,47 @@ export default function PlantOSPage() {
     // Follow-up: charts in chat only — do not auto-land on canvas.
     setE2eFollowUpTower(payload as PlantTowerPayload);
   }, []);
+
+  /** E2E answer-gate: start await + mark Trigger idle without answer → must not land pins. */
+  const runE2eAnswerGatePrepare = useCallback(async () => {
+    setError(null);
+    setMode("engineer");
+    setCanvasPins([]);
+    dismissedPinIdsRef.current.clear();
+    sessionFirstAskDoneRef.current = false;
+    setSessionFirstAskDone(false);
+    setAutoHiddenTowerKey(null);
+    setAllowChatCharts(false);
+    chatAnswerReadyRef.current = false;
+    setChatAnswerReadyFlag(false);
+    setE2eAnswerGateBlurb(false);
+    setE2eFirstAskBlurb(false);
+    setE2eFollowUpTower(null);
+
+    awaitingBindRef.current = {
+      mode: "engineer",
+      q: 0,
+      question: MODE_QUESTIONS.engineer[0],
+      sawBusy: true,
+    };
+    setAwaitingQuestion(MODE_QUESTIONS.engineer[0]);
+    setAwaitingMode("engineer");
+    setWaitStartedAt(Date.now());
+    setTriggerWait(initialTriggerWaitView(0));
+    setMobileTab("visuals");
+
+    // Simulate Trigger idle while answer is still missing.
+    tryRevealBoundTower();
+  }, [tryRevealBoundTower]);
+
+  /** E2E answer-gate: inject blurb + open gate → pins land. */
+  const runE2eAnswerGateAnswer = useCallback(() => {
+    setE2eAnswerGateBlurb(true);
+    chatAnswerReadyRef.current = true;
+    setChatAnswerReadyFlag(true);
+    revealWhenAnswerReadyRef.current = true;
+    tryRevealBoundTower();
+  }, [tryRevealBoundTower]);
 
   const view = mode === "overview" ? null : data ?? agentVisuals[mode] ?? null;
   const stageTower = tower ?? towersByMode[mode] ?? null;
@@ -977,13 +1170,24 @@ export default function PlantOSPage() {
           movedPinKeys={movedChatPinKeys}
           fixtureTower={fixtureTower}
           autoHiddenTowerKey={autoHiddenTowerKey}
+          allowChatCharts={allowChatCharts}
+          onFollowUpChatAsk={() => {
+            if (sessionFirstAskDoneRef.current) setAllowChatCharts(true);
+          }}
           onChatSessionReset={resetChatSessionFirstAsk}
+          onActiveChatChange={onActiveChatChange}
           e2eFirstAsk={e2eFirstAsk}
           e2eFirstAskBlurb={e2eFirstAskBlurb}
           e2eFollowUpTower={e2eFollowUpTower}
           sessionFirstAskDone={sessionFirstAskDone}
+          chatAnswerReadyFlag={chatAnswerReadyFlag}
+          onChatAnswerGate={onChatAnswerGate}
+          e2eAnswerGate={e2eAnswerGate}
+          e2eAnswerGateBlurb={e2eAnswerGateBlurb}
           onE2eSimFirstAsk={runE2eSimFirstAsk}
           onE2eSimFollowUp={runE2eSimFollowUp}
+          onE2eAnswerGatePrepare={runE2eAnswerGatePrepare}
+          onE2eAnswerGateAnswer={runE2eAnswerGateAnswer}
         />
       }
       stage={

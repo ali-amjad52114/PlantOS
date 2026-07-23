@@ -2,12 +2,65 @@
 
 import { CHAT_DEFAULT_READING_LIMIT } from "@/lib/chat-visual-budget";
 
+const FINANCE_LABELS: Record<string, string> = {
+  productionValueUSD: "Value",
+  operatingCostUSD: "Cost",
+  marginUSD: "Margin",
+  plannedRevenue: "Planned",
+  varianceVsPlanUSD: "vs plan",
+  costPerMWh: "$/MWh",
+  projectedShiftValue: "Projected",
+  variableEnergy: "Energy $",
+  labourAndFixed: "Labour+fixed",
+};
+
+const OPS_LABELS: Record<string, string> = {
+  currentRateMW: "Rate",
+  percentOfTarget: "vs target",
+  capacityUtilizationPct: "Capacity",
+  bottleneckArea: "Bottleneck",
+};
+
+function financeValue(data: any, key: string): string {
+  if (key === "variableEnergy") return `$${fmtNum(data.costBreakdown?.variableEnergy, 0)}`;
+  if (key === "labourAndFixed") return `$${fmtNum(data.costBreakdown?.labourAndFixed, 0)}`;
+  if (key === "percentOfTarget") return `${fmtNum(data.percentOfTarget)}%`;
+  if (key === "costPerMWh") return `$${fmtNum(data.costPerMWh)}`;
+  if (
+    key === "productionValueUSD" ||
+    key === "operatingCostUSD" ||
+    key === "marginUSD" ||
+    key === "plannedRevenue" ||
+    key === "varianceVsPlanUSD" ||
+    key === "projectedShiftValue"
+  ) {
+    return `$${fmtNum(data[key], 0)}`;
+  }
+  const v = data[key];
+  if (typeof v === "number") return fmtNum(v);
+  return v != null ? String(v) : "—";
+}
+
+function opsValue(data: any, key: string): string {
+  if (key === "currentRateMW") return `${fmtNum(data.currentRateMW)} MW`;
+  if (key === "percentOfTarget" || key === "capacityUtilizationPct") {
+    return `${fmtNum(data[key])}%`;
+  }
+  if (key === "bottleneckArea") return String(data.bottleneckArea || "—");
+  const v = data[key];
+  if (typeof v === "number") return fmtNum(v);
+  return v != null ? String(v) : "—";
+}
+
 export function FindingsBody({
   kind,
   data,
+  findingsKeys,
 }: {
   kind: "engineer" | "operations" | "finance";
   data: any;
+  /** When set (from selectVisuals), drives which metrics appear (≤4). */
+  findingsKeys?: string[] | null;
 }) {
   if (kind === "engineer") {
     const rows = Array.isArray(data.attention)
@@ -52,20 +105,25 @@ export function FindingsBody({
   }
 
   if (kind === "operations") {
-    const metrics = [
-      { k: "Rate", v: `${fmtNum(data.currentRateMW)} MW` },
-      { k: "vs target", v: `${fmtNum(data.percentOfTarget)}%` },
-      { k: "Capacity", v: `${fmtNum(data.capacityUtilizationPct)}%` },
-      { k: "Bottleneck", v: String(data.bottleneckArea || "—") },
-    ];
+    const keys =
+      findingsKeys?.length
+        ? findingsKeys.slice(0, CHAT_DEFAULT_READING_LIMIT)
+        : ["currentRateMW", "percentOfTarget", "capacityUtilizationPct", "bottleneckArea"];
+    const metrics = keys.map((k) => ({
+      k: OPS_LABELS[k] || k,
+      v: opsValue(data, k),
+    }));
     return <MetricStrip metrics={metrics} />;
   }
 
-  const metrics = [
-    { k: "Value", v: `$${fmtNum(data.productionValueUSD, 0)}` },
-    { k: "Cost", v: `$${fmtNum(data.operatingCostUSD, 0)}` },
-    { k: "Margin", v: `$${fmtNum(data.marginUSD, 0)}` },
-  ];
+  const keys =
+    findingsKeys?.length
+      ? findingsKeys.slice(0, CHAT_DEFAULT_READING_LIMIT)
+      : ["productionValueUSD", "operatingCostUSD", "marginUSD"];
+  const metrics = keys.map((k) => ({
+    k: FINANCE_LABELS[k] || k,
+    v: financeValue(data, k),
+  }));
   return (
     <div>
       <MetricStrip metrics={metrics} />

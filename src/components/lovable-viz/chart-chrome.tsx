@@ -161,15 +161,46 @@ function ChartShell({
   );
 }
 
+function parseSeriesMs(t: string | number): number | null {
+  if (typeof t === "number" && Number.isFinite(t)) return t;
+  const raw = String(t).trim();
+  if (/^\d+$/.test(raw)) {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+  const normalized = /^\d{4}-\d{2}-\d{2} /.test(raw) ? raw.replace(" ", "T") : raw;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+}
+
 function useChartData(seed: Array<{ t: string | number; v: number }> = DEFAULT_SEED) {
   const bound = useCardLive();
+  const window = bound?.seriesWindow;
   if (bound?.series?.length) {
+    if (window && Number.isFinite(window.startMs) && Number.isFinite(window.endMs)) {
+      const data = bound.series
+        .map((p) => {
+          const ms = parseSeriesMs(p.t);
+          if (ms == null) return null;
+          return { t: ms, v: Number(p.v) };
+        })
+        .filter((p): p is { t: number; v: number } => p != null);
+      return {
+        data,
+        unit: bound.unit,
+        items: bound.items,
+        primary: bound.primary,
+        live: true as const,
+        timeDomain: [window.startMs, window.endMs] as [number, number],
+      };
+    }
     return {
       data: bound.series.map((p) => ({ t: formatAxisTime(p.t), v: Number(p.v) })),
       unit: bound.unit,
       items: bound.items,
       primary: bound.primary,
       live: true as const,
+      timeDomain: null as [number, number] | null,
     };
   }
   return {
@@ -178,6 +209,27 @@ function useChartData(seed: Array<{ t: string | number; v: number }> = DEFAULT_S
     items: bound?.items,
     primary: bound?.primary,
     live: false as const,
+    timeDomain: null as [number, number] | null,
+  };
+}
+
+function timeXAxisProps(domain: [number, number]) {
+  return {
+    ...xAxisProps,
+    type: "number" as const,
+    domain,
+    allowDataOverflow: true,
+    tickFormatter: (v: number) => formatAxisTime(v),
+  };
+}
+
+function tipContentForChart(unit: string | undefined, valueDecimals: number, timeScale: boolean) {
+  const base = tipContent(unit, valueDecimals);
+  if (!timeScale) return base;
+  return function TipBody(props: TipProps) {
+    const label =
+      typeof props.label === "number" ? formatAxisTime(props.label) : props.label;
+    return base({ ...props, label });
   };
 }
 
@@ -189,8 +241,9 @@ export function InteractiveSeriesChart({
   unit?: string;
   seed?: Array<{ t: string | number; v: number }>;
 }) {
-  const { data, unit } = useChartData(seed);
+  const { data, unit, timeDomain } = useChartData(seed);
   const u = unitProp || unit || "MW";
+  const xProps = timeDomain ? timeXAxisProps(timeDomain) : xAxisProps;
   return (
     <ChartShell mark="series" testId="interactive-series">
       {({ width, height }) => (
@@ -203,14 +256,14 @@ export function InteractiveSeriesChart({
           </defs>
           {/* Recharts only sees direct children — do NOT wrap axes/tooltip in custom components */}
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} strokeOpacity={0.7} />
-          <XAxis {...xAxisProps} />
+          <XAxis {...xProps} />
           <YAxis {...yAxisProps} />
           <Tooltip
             allowEscapeViewBox={{ x: true, y: true }}
             isAnimationActive={false}
             wrapperStyle={{ zIndex: 60, outline: "none", pointerEvents: "none" }}
             cursor={{ stroke: STROKE, strokeOpacity: 0.4, strokeDasharray: "4 4" }}
-            content={tipContent(u, 2)}
+            content={tipContentForChart(u, 2, Boolean(timeDomain))}
           />
           <Area
             type="monotone"
@@ -236,21 +289,22 @@ export function InteractiveBarChart({
   unit?: string;
   seed?: Array<{ t: string | number; v: number }>;
 }) {
-  const { data, unit } = useChartData(seed);
+  const { data, unit, timeDomain } = useChartData(seed);
   const u = unitProp || unit || "MW";
+  const xProps = timeDomain ? timeXAxisProps(timeDomain) : xAxisProps;
   return (
     <ChartShell mark="bars" testId="interactive-bars">
       {({ width, height }) => (
         <BarChart width={width} height={height} data={data} margin={chartMargin}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} strokeOpacity={0.7} />
-          <XAxis {...xAxisProps} />
+          <XAxis {...xProps} />
           <YAxis {...yAxisProps} />
           <Tooltip
             allowEscapeViewBox={{ x: true, y: true }}
             isAnimationActive={false}
             wrapperStyle={{ zIndex: 60, outline: "none", pointerEvents: "none" }}
             cursor={{ stroke: STROKE, strokeOpacity: 0.4, strokeDasharray: "4 4" }}
-            content={tipContent(u, 2)}
+            content={tipContentForChart(u, 2, Boolean(timeDomain))}
           />
           <Bar dataKey="v" name="Value" fill={STROKE} radius={[5, 5, 0, 0]} isAnimationActive={false} />
         </BarChart>
@@ -267,8 +321,9 @@ export function InteractiveLineChart({
   unit?: string;
   seed?: Array<{ t: string | number; v: number }>;
 }) {
-  const { data, unit } = useChartData(seed);
+  const { data, unit, timeDomain } = useChartData(seed);
   const u = unitProp || unit || "MW";
+  const xProps = timeDomain ? timeXAxisProps(timeDomain) : xAxisProps;
   const dual = data.map((d, i) => ({
     ...d,
     secondary: d.v * (0.92 + (i % 5) * 0.01),
@@ -278,14 +333,14 @@ export function InteractiveLineChart({
       {({ width, height }) => (
         <LineChart width={width} height={height} data={dual} margin={chartMargin}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} strokeOpacity={0.7} />
-          <XAxis {...xAxisProps} />
+          <XAxis {...xProps} />
           <YAxis {...yAxisProps} />
           <Tooltip
             allowEscapeViewBox={{ x: true, y: true }}
             isAnimationActive={false}
             wrapperStyle={{ zIndex: 60, outline: "none", pointerEvents: "none" }}
             cursor={{ stroke: STROKE, strokeOpacity: 0.4, strokeDasharray: "4 4" }}
-            content={tipContent(u, 2)}
+            content={tipContentForChart(u, 2, Boolean(timeDomain))}
           />
           <Line
             type="monotone"

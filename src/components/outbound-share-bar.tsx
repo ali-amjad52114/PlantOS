@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Mail, MessageSquare, Presentation, FileSpreadsheet, FileText } from "lucide-react";
 import { useRealtimeRun } from "@trigger.dev/react-hooks";
 import {
@@ -13,6 +13,13 @@ import { startOutboundGoogleSend } from "@/app/actions-outbound-google";
 import { captureCanvasChartImages } from "@/lib/outbound/capture-charts";
 import type { OutboundPack } from "@/lib/outbound/pack";
 import type { GoogleConnector } from "@/lib/outbound/config";
+import {
+  isInFlightPhase,
+  isTerminalFailure,
+  isTerminalSuccess,
+  phaseLabel,
+  type SendPhase,
+} from "@/lib/outbound/send-phases";
 
 type StatusPayload = {
   enabled: boolean;
@@ -49,10 +56,29 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
   const [intentId, setIntentId] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [rtToken, setRtToken] = useState<string | null>(null);
-  const [phase, setPhase] = useState<string>("idle");
+  const [phase, setPhase] = useState<SendPhase>("idle");
+  const [activeTarget, setActiveTarget] = useState<PreviewTarget | null>(null);
   const [captureHint, setCaptureHint] = useState<string | null>(null);
   const [hasMessageTs, setHasMessageTs] = useState(false);
   const [artifactUrl, setArtifactUrl] = useState<string | null>(null);
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearEphemeralTimer() {
+    if (clearTimerRef.current) {
+      clearTimeout(clearTimerRef.current);
+      clearTimerRef.current = null;
+    }
+  }
+
+  function scheduleClearAfterSent() {
+    clearEphemeralTimer();
+    clearTimerRef.current = setTimeout(() => {
+      setPhase("idle");
+      setActiveTarget(null);
+      setCaptureHint(null);
+      setBusy(false);
+    }, 3200);
+  }
 
   async function refreshStatus() {
     try {
@@ -66,6 +92,7 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
 
   useEffect(() => {
     void refreshStatus();
+    return () => clearEphemeralTimer();
   }, []);
 
   const { run } = useRealtimeRun(runId ?? undefined, {
@@ -75,27 +102,53 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
   });
 
   useEffect(() => {
-    const outbound = (run?.metadata as {
-      outbound?: { phase?: string; error?: string; url?: string };
-    } | undefined)?.outbound;
-    if (outbound?.phase) setPhase(outbound.phase);
+    const outbound = (
+      run?.metadata as { outbound?: { phase?: string; error?: string; url?: string } } | undefined
+    )?.outbound;
+
+    if (outbound?.phase) {
+      setPhase(outbound.phase as SendPhase);
+    }
     if (outbound?.error) setError(outbound.error);
     if (outbound?.url) setArtifactUrl(outbound.url);
+
     if (
       outbound?.phase === "succeeded" ||
+      outbound?.phase === "already_succeeded" ||
       outbound?.phase === "failed" ||
-      outbound?.phase === "uncertain"
+      outbound?.phase === "uncertain" ||
+      outbound?.phase === "reverted"
     ) {
       setBusy(false);
     }
-    if (outbound?.phase === "reverted") {
+
+    // Realtime fallback if metadata is thin but run finished.
+    if (!outbound?.phase && run?.status === "COMPLETED") {
+      setPhase("succeeded");
       setBusy(false);
-      setPhase("reverted");
     }
-  }, [run?.metadata]);
+    if (
+      !outbound?.phase &&
+      (run?.status === "FAILED" ||
+        run?.status === "CRASHED" ||
+        run?.status === "SYSTEM_FAILURE")
+    ) {
+      setPhase("failed");
+      setBusy(false);
+      setError((prev) => prev || `Run ${run.status}`);
+    }
+  }, [run?.metadata, run?.status]);
 
   useEffect(() => {
-    if (phase !== "succeeded" || !intentId || previewTarget !== "slack") {
+    if (isTerminalSuccess(phase)) {
+      scheduleClearAfterSent();
+    }
+    // Failures stay visible until the next send; don't auto-wipe errors.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
+  useEffect(() => {
+    if (!isTerminalSuccess(phase) || !intentId || previewTarget !== "slack") {
       if (previewTarget !== "slack") setHasMessageTs(false);
       return;
     }
@@ -113,14 +166,12 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
   if (!status?.enabled) return null;
 
   const g = status.google;
-  const inFlight =
-    busy ||
-    phase === "sending" ||
-    phase === "uploading" ||
-    phase === "start" ||
-    phase === "undoing" ||
-    phase === "capturing";
-  const canUndo = previewTarget === "slack" && phase === "succeeded" && Boolean(intentId) && hasMessageTs;
+  const inFlight = isInFlightPhase(phase, busy);
+  const canUndo =
+    activeTarget === "slack" &&
+    isTerminalSuccess(phase) &&
+    Boolean(intentId) &&
+    hasMessageTs;
 
   async function connectApp(connector?: GoogleConnector) {
     setError(null);
@@ -197,9 +248,12 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
       setError("No message to send — pin or load a chart first.");
       return;
     }
+    clearEphemeralTimer();
     setPreviewOpen(false);
     setBusy(true);
     setError(null);
+    setActiveTarget(previewTarget);
+    setArtifactUrl(null);
 
     const images = await captureImages();
     setPhase("start");
@@ -258,11 +312,14 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
 
   async function onUndo() {
     if (!intentId) return;
+    clearEphemeralTimer();
     setBusy(true);
+    setActiveTarget("slack");
     setPhase("undoing");
     const res = await undoOutboundSlack(intentId);
     if (!res.ok) {
       setBusy(false);
+      setPhase("undo_failed");
       setError(res.error);
       return;
     }
@@ -274,7 +331,7 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
     if (!intentId) return;
     const res = await readOutboundIntent(intentId);
     if (res.ok) {
-      setPhase(res.intent.status);
+      setPhase(res.intent.status as SendPhase);
       if (res.intent.error) setError(res.intent.error);
       const url = (res.intent.receipt as { url?: string } | undefined)?.url;
       if (url) setArtifactUrl(url);
@@ -292,6 +349,17 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
             ? "Google Docs"
             : "Google Slides";
 
+  function targetSendState(target: PreviewTarget) {
+    if (activeTarget !== target || phase === "idle") return null;
+    return {
+      phase,
+      label: phaseLabel(phase),
+      spinning: isInFlightPhase(phase, busy),
+      ok: isTerminalSuccess(phase),
+      bad: isTerminalFailure(phase),
+    };
+  }
+
   return (
     <div className="shrink-0 rounded-xl border-2 border-border bg-surface/80 px-3 py-2">
       <div className="grid grid-cols-5 items-start gap-2">
@@ -300,57 +368,68 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
             type="button"
             disabled={inFlight}
             onClick={() => void onSlackClick()}
+            data-testid="outbound-send-slack"
             className={`inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border-2 bg-background px-2.5 py-1.5 text-xs font-semibold hover:bg-muted disabled:opacity-50 ${
               status.connected ? "border-emerald-300/70" : "border-border"
             }`}
           >
-            {inFlight && previewTarget === "slack" ? (
+            {targetSendState("slack")?.spinning ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <MessageSquare className="h-3.5 w-3.5" />
             )}
             {status.connected ? "Send to Slack" : "Connect Slack"}
           </button>
-          <ConnectionStatus connected={Boolean(status.connected)} />
+          <TargetStatus
+            connected={Boolean(status.connected)}
+            send={targetSendState("slack")}
+          />
         </div>
 
         <GoogleShareButton
           enabled={Boolean(g?.gmail)}
           connected={Boolean(g?.connected?.gmail)}
           inFlight={inFlight}
+          send={targetSendState("gmail")}
           icon={<Mail className="h-3.5 w-3.5" />}
           label="Gmail"
+          testId="outbound-send-gmail"
           onClick={() => void onGoogleClick("gmail")}
         />
         <GoogleShareButton
           enabled={Boolean(g?.sheets)}
           connected={Boolean(g?.connected?.sheets)}
           inFlight={inFlight}
+          send={targetSendState("sheets")}
           icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
           label="Sheets"
+          testId="outbound-send-sheets"
           onClick={() => void onGoogleClick("sheets")}
         />
         <GoogleShareButton
           enabled={Boolean(g?.docs)}
           connected={Boolean(g?.connected?.docs)}
           inFlight={inFlight}
+          send={targetSendState("docs")}
           icon={<FileText className="h-3.5 w-3.5" />}
           label="Docs"
+          testId="outbound-send-docs"
           onClick={() => void onGoogleClick("docs")}
         />
         <GoogleShareButton
           enabled={Boolean(g?.slides)}
           connected={Boolean(g?.connected?.slides)}
           inFlight={inFlight}
+          send={targetSendState("slides")}
           icon={<Presentation className="h-3.5 w-3.5" />}
           label="Slides"
+          testId="outbound-send-slides"
           onClick={() => void onGoogleClick("slides")}
         />
       </div>
 
-      {(phase !== "idle" || artifactUrl || canUndo) && (
+      {(artifactUrl || canUndo || isTerminalFailure(phase)) && (
         <div className="mt-2 flex flex-wrap items-center justify-end gap-2 text-[11px] text-muted-foreground">
-          {phase !== "idle" && <span className="tabular">· {phase}</span>}
           {artifactUrl && (
             <a
               href={artifactUrl}
@@ -371,7 +450,7 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
               Undo
             </button>
           )}
-          {intentId && (phase === "failed" || phase === "uncertain") && (
+          {intentId && isTerminalFailure(phase) && (
             <button
               type="button"
               className="rounded border border-border px-2 py-0.5 text-[11px] hover:bg-muted"
@@ -383,7 +462,7 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
         </div>
       )}
 
-      {captureHint && !error && (
+      {captureHint && !error && phase !== "idle" && (
         <p className="mt-1.5 text-[11px] text-muted-foreground" role="status">
           {captureHint}
         </p>
@@ -420,6 +499,7 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
           <div className="mt-3 flex gap-2">
             <button
               type="button"
+              data-testid="outbound-confirm-send"
               onClick={() => void confirmSend()}
               className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
             >
@@ -439,19 +519,31 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
   );
 }
 
+type SendUi = {
+  phase: SendPhase;
+  label: string;
+  spinning: boolean;
+  ok: boolean;
+  bad: boolean;
+} | null;
+
 function GoogleShareButton({
   enabled,
   connected,
   inFlight,
+  send,
   icon,
   label,
+  testId,
   onClick,
 }: {
   enabled: boolean;
   connected: boolean;
   inFlight: boolean;
+  send: SendUi;
   icon: React.ReactNode;
   label: string;
+  testId: string;
   onClick: () => void;
 }) {
   const button = !enabled ? (
@@ -468,12 +560,13 @@ function GoogleShareButton({
     <button
       type="button"
       disabled={inFlight}
+      data-testid={testId}
       onClick={onClick}
       className={`inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border-2 bg-background px-2.5 py-1.5 text-xs font-semibold hover:bg-muted disabled:opacity-50 ${
         connected ? "border-emerald-300/70" : "border-border"
       }`}
     >
-      {icon}
+      {send?.spinning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : icon}
       {connected ? `Send to ${label}` : `Connect ${label}`}
     </button>
   );
@@ -481,12 +574,45 @@ function GoogleShareButton({
   return (
     <div className="flex min-w-0 flex-col items-center gap-1">
       {button}
-      <ConnectionStatus connected={enabled && connected} />
+      <TargetStatus connected={enabled && connected} send={send} />
     </div>
   );
 }
 
-function ConnectionStatus({ connected }: { connected: boolean }) {
+function TargetStatus({ connected, send }: { connected: boolean; send: SendUi }) {
+  if (send) {
+    return (
+      <span
+        className={`inline-flex items-center gap-1 text-[10px] font-medium ${
+          send.ok
+            ? "text-emerald-700"
+            : send.bad
+              ? "text-[color:var(--danger)]"
+              : "text-muted-foreground"
+        }`}
+        role="status"
+        data-testid="outbound-send-progress"
+        data-phase={send.phase}
+      >
+        {send.spinning ? (
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+        ) : (
+          <span
+            aria-hidden="true"
+            className={
+              send.ok
+                ? "h-1.5 w-1.5 rounded-full bg-emerald-500"
+                : send.bad
+                  ? "h-1.5 w-1.5 rounded-full bg-[color:var(--danger)]"
+                  : "h-1.5 w-1.5 rounded-full bg-amber-400"
+            }
+          />
+        )}
+        {send.label}
+      </span>
+    );
+  }
+
   return (
     <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
       <span

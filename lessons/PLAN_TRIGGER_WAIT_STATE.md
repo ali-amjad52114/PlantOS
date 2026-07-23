@@ -16,7 +16,7 @@ While an Engineers (or other persona) starter question is in flight, the **right
 - **Receipt:** full timed list stays visible + one-line Trigger summary (`Handled by Trigger · …`) with optional **Run detail** expand.
 - Drive phases from **real signals only** (chat transport status, stream parts, agent metadata we already emit). Do **not** fake parallel “3 child runs” on the Ask chat path — that belongs to `plant-parallel-investigate`, not `plantos-agent` Ask.
 - Keep canvas pin board rules from `PLAN_CHAT_CANVAS_PINS.md` (grid 1 | 2-wide, no free-float, no early CH dump before Trigger idle).
-- Existing hang fallback (show CH cards if Trigger stalls) may remain, but the wait UI must still look Trigger-native until that fallback fires.
+- **Answer-before-canvas** timing is owned by [`PLAN_ANSWER_BEFORE_CANVAS.md`](./PLAN_ANSWER_BEFORE_CANVAS.md): do not land auto pins until chat takeaway text is visible (hang path must not dump cards early).
 
 ## Phase ladder (Ask / `plantos-agent` only — map signals → copy)
 

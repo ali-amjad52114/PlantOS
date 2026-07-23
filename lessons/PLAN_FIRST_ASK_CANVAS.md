@@ -18,7 +18,7 @@ When the user asks the **first question in a chat session**, put the **narrative
    - Canvas: **do not** auto-append charts for follow-ups. Existing pins stay; live bind may refresh **bindings** of already-pinned cards only (same rule as `PLAN_CHAT_CANVAS_PINS`).
 4. **Relevant, not random:** use the existing `question-card-maps` for that mode+q. Take the **first two** `cardTypes` in the map as the first-ask canvas pair. Do **not** invent unrelated cards, fill with gallery leftovers, or land all 4 map cards on first ask.
 5. Pins remain individual grid pins (span 1|2); move-on-pin still removes from chat when the user moves a follow-up chart.
-6. Trigger wait / CH bind timing stays owned by `PLAN_TRIGGER_WAIT_STATE.md` — do not dump first-ask cards before Trigger idle (existing hang fallback OK).
+6. Trigger wait / CH bind timing stays owned by `PLAN_TRIGGER_WAIT_STATE.md`. **Answer-before-canvas** timing (no auto pins until chat blurb is visible) is owned by [`PLAN_ANSWER_BEFORE_CANVAS.md`](./PLAN_ANSWER_BEFORE_CANVAS.md).
 
 ## DO
 1. Track per chat session whether the **first ask has already completed** (e.g. `firstAskDone` keyed by `chatId`, or derive from “has this session already revealed a first-ask canvas pair”). Reset on New chat / new `chatId`.

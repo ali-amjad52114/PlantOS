@@ -69,15 +69,40 @@ export async function latestByTags(tagList: string[]) {
   }
 }
 
-export async function trend(tag: string, hours = 1) {
+export async function trend(tag: string, hoursOrMinutes: number = 1, unit: "hour" | "minute" = "hour") {
   try {
     const ch = getClickHouse();
+    if (unit === "minute") {
+      const minutes = Math.max(1, Math.floor(hoursOrMinutes));
+      const result = await ch.query({
+        query: `
+          SELECT ts, value FROM plant_readings
+          WHERE tag = {tag:String}
+            AND source IN ('live', 'history')
+            AND ts >= (
+              SELECT max(ts) - INTERVAL {minutes:UInt32} MINUTE
+              FROM plant_readings
+              WHERE tag = {tag:String} AND source IN ('live', 'history')
+            )
+          ORDER BY ts
+          LIMIT 500
+        `,
+        query_params: { tag, minutes },
+        format: "JSONEachRow",
+      });
+      return await result.json();
+    }
+    const hours = Math.max(1, Math.floor(hoursOrMinutes));
     const result = await ch.query({
       query: `
         SELECT ts, value FROM plant_readings
         WHERE tag = {tag:String}
           AND source IN ('live', 'history')
-          AND ts >= (SELECT max(ts) - INTERVAL {hours:UInt32} HOUR FROM plant_readings WHERE tag = {tag:String})
+          AND ts >= (
+            SELECT max(ts) - INTERVAL {hours:UInt32} HOUR
+            FROM plant_readings
+            WHERE tag = {tag:String} AND source IN ('live', 'history')
+          )
         ORDER BY ts
         LIMIT 500
       `,

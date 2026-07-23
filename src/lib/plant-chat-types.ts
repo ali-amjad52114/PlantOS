@@ -24,8 +24,18 @@ export const plantTowerDataSchema = z.object({
         hint: z.string(),
       })
     )
-    .length(4),
-  source: z.literal("role-default"),
+    .min(1)
+    .max(4),
+  source: z.enum(["role-default", "question-map", "selected"]),
+  question: z.string().optional(),
+  findingsKeys: z.array(z.string()).optional(),
+});
+
+/** Selected findings keys for the compact metric strip. */
+export const visualSelectionDataSchema = z.object({
+  cardTypes: z.array(z.string()),
+  findingsKeys: z.array(z.string()),
+  rationale: z.string(),
 });
 
 /** Transient investigation journey steps. */
@@ -50,5 +60,6 @@ export const turnAuditDataSchema = z.object({
 export type PlantChatDataTypes = {
   "investigation-step": z.infer<typeof investigationStepDataSchema>;
   "plant-tower": z.infer<typeof plantTowerDataSchema>;
+  "visual-selection": z.infer<typeof visualSelectionDataSchema>;
   "turn-audit": z.infer<typeof turnAuditDataSchema>;
 };

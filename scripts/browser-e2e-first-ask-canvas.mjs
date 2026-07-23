@@ -67,6 +67,12 @@ try {
   }
   result.steps.firstAskChartsNotInChat = true;
 
+  const lovableLabel = await page.getByText(/Lovable Visual/i).count();
+  result.steps.lovableVisualLabelCount = lovableLabel;
+  if (lovableLabel > 0) {
+    throw new Error("Lovable Visual deck label must not appear in chat");
+  }
+
   await page.screenshot({ path: resolve(OUT, "first-ask-01-canvas.png") });
   result.screenshots.push("first-ask-01-canvas.png");
 

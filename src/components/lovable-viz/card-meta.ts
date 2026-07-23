@@ -13,6 +13,10 @@ export type LovableCardMeta = {
   description: string;
   /** Visual priority family: lovable first, then replit. */
   family: CardFamily;
+  /** Optional selector hints; primary corpus is `visual-catalog` enrichment. */
+  answers?: string[];
+  metrics?: string[];
+  shape?: string;
 };
 
 const BASE_LOVABLE_CARD_META: LovableCardMeta[] = [

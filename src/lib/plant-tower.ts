@@ -8,6 +8,13 @@ export type CardBinding = {
   unit?: string;
   caption?: string;
   series?: Array<{ t: string; v: number }>;
+  /** Fixed X domain for historian cards — span selected range even if series is sparse. */
+  seriesWindow?: {
+    startMs: number;
+    endMs: number;
+    minutes: number;
+    live?: boolean;
+  };
   items?: Array<{
     label: string;
     value: number;
@@ -28,13 +35,16 @@ export type PlantTowerPayload = {
   role: PlantRole;
   deck: number;
   deckName: string;
-  cards: PlantTowerCardRef[]; // exactly 4
-  source: "role-default" | "question-map";
+  /** 1–4 cards; chat shows ≤1, first-ask canvas ≤2. */
+  cards: PlantTowerCardRef[];
+  source: "role-default" | "question-map" | "selected";
   mode?: string;
   questionIndex?: number;
   question?: string;
   dataSource?: string;
   elapsedMs?: number;
+  /** Keys for the findings strip (≤4). */
+  findingsKeys?: string[];
 };
 
 /** Interim defaults until question→card maps exist. */
