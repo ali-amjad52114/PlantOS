@@ -348,10 +348,7 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
         />
       </div>
 
-      {(phase !== "idle" ||
-        artifactUrl ||
-        canUndo ||
-        (intentId && (phase === "failed" || phase === "uncertain"))) && (
+      {(phase !== "idle" || artifactUrl || canUndo) && (
         <div className="mt-2 flex flex-wrap items-center justify-end gap-2 text-[11px] text-muted-foreground">
           {phase !== "idle" && <span className="tabular">· {phase}</span>}
           {artifactUrl && (
