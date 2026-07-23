@@ -11,9 +11,9 @@ While an Engineers (or other persona) starter question is in flight, the **right
 ## Product lock (read first)
 - This is a **Trigger depth** story, not a plant-findings story. No “investigating turbine tags” as the hero line unless it is literally a durable tool name under a Trigger primitive subtitle.
 - Pattern from the agreed mock:
-  - **Now:** one human headline + one mono Trigger primitive line + elapsed time + thin progress.
-  - **Done trail:** at most the last **1–2** completed phases as quiet checks (drop older).
-  - **Receipt:** one line (`Handled by Trigger · …`) + optional **Run detail** expand.
+  - **Now:** growing list of every phase that has run; each completed row keeps its **own duration** on the right; active row shows a live timer that resets when the previous phase ends.
+- **Done trail:** keep **all** completed phases (do not drop older ones).
+- **Receipt:** full timed list stays visible + one-line Trigger summary (`Handled by Trigger · …`) with optional **Run detail** expand.
 - Drive phases from **real signals only** (chat transport status, stream parts, agent metadata we already emit). Do **not** fake parallel “3 child runs” on the Ask chat path — that belongs to `plant-parallel-investigate`, not `plantos-agent` Ask.
 - Keep canvas pin board rules from `PLAN_CHAT_CANVAS_PINS.md` (grid 1 | 2-wide, no free-float, no early CH dump before Trigger idle).
 - Existing hang fallback (show CH cards if Trigger stalls) may remain, but the wait UI must still look Trigger-native until that fallback fires.
@@ -39,7 +39,7 @@ Receipt summary fields (when available): turn count, tool names used, `elapsedMs
 2. Derive wait state from existing Ask plumbing in `page.tsx` / `plant-chat.tsx`:
    - `onStreamProgress` / message parts / busy edge
    - Prefer **live** labels from real parts over coarse remapped “Think / Investigate / Tower / Answer.”
-3. Map stream + status → the phase ladder table; keep max **1 active** + **≤2 done** visible.
+3. Map stream + status → the phase ladder table; keep max **1 active** + **all done** visible with per-step timings.
 4. On Trigger turn complete (busy true→false after `sawBusy`), show receipt briefly, then proceed with existing CH bind + pin land (do not resurrect the 1.6s early bind).
 5. Style: calm, compact, fits existing shell tokens (surface / border / muted / mono). Match the mock’s hierarchy (headline / primitive / timer / bar / receipt) without importing Tabler CDN or new design systems unless already in-repo.
 6. `prefers-reduced-motion`: no infinite spinner spin; bar may jump.

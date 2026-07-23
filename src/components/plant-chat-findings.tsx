@@ -1,5 +1,7 @@
 "use client";
 
+import { CHAT_DEFAULT_READING_LIMIT } from "@/lib/chat-visual-budget";
+
 export function FindingsBody({
   kind,
   data,
@@ -8,7 +10,9 @@ export function FindingsBody({
   data: any;
 }) {
   if (kind === "engineer") {
-    const rows = Array.isArray(data.attention) ? data.attention.slice(0, 5) : [];
+    const rows = Array.isArray(data.attention)
+      ? data.attention.slice(0, CHAT_DEFAULT_READING_LIMIT)
+      : [];
     if (!rows.length) {
       return <p className="px-3 py-2 text-xs text-muted-foreground">No attention tags returned.</p>;
     }

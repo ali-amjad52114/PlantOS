@@ -1,6 +1,7 @@
 /**
  * Canvas pins proof — lessons/PLAN_CHAT_CANVAS_PINS.md
  * 2-column grid: span 1 | 2-wide; reorder by drag-swap.
+ * Move (not copy): pin/drag removes the source from chat.
  * Uses ?e2eCanvas=1 fixture so OpenAI/Trigger are not required.
  */
 import { chromium } from "playwright";
@@ -23,13 +24,21 @@ page.setDefaultTimeout(45000);
 
 try {
   await page.goto("http://localhost:3001/?e2eCanvas=1", { waitUntil: "domcontentloaded" });
-  // Shell mode label is "Engineers" (see plant-shell MODE_NAV).
-  await page.getByRole("button", { name: /^Engineers$/i }).click();
+  // Shell mode label is "Engineer" (singular — plant-shell MODE_NAV).
+  await page.getByRole("button", { name: /^Engineer$/i }).click();
   await page.waitForTimeout(1500);
 
   const fixture = page.getByTestId("canvas-fixture-source");
   await fixture.waitFor({ state: "visible" });
   result.steps.fixtureVisible = true;
+
+  const fixtureCards = page.locator('[data-testid^="canvas-fixture-card-"]');
+  const chatCardsBefore = await fixtureCards.count();
+  result.steps.chatCardsBefore = chatCardsBefore;
+  if (chatCardsBefore < 2) throw new Error("Need ≥2 fixture cards");
+
+  const firstCardTestId = await fixtureCards.first().getAttribute("data-testid");
+  result.steps.firstMovedCard = firstCardTestId;
 
   const pinButtons = page.getByTestId("pin-to-canvas");
   await pinButtons.nth(0).click();
@@ -39,6 +48,21 @@ try {
   let count = await pins.count();
   result.steps.pinCountAfterFirst = count;
   if (count !== 1) throw new Error(`Expected 1 pin, got ${count}`);
+
+  // Move semantics: source must leave chat
+  const firstStillInChat = await page.getByTestId(firstCardTestId).count();
+  result.steps.firstCardStillInChat = firstStillInChat;
+  if (firstStillInChat !== 0) {
+    throw new Error(`Expected ${firstCardTestId} removed from chat after move, still present`);
+  }
+  const chatCardsAfterFirst = await fixtureCards.count();
+  result.steps.chatCardsAfterFirst = chatCardsAfterFirst;
+  if (chatCardsAfterFirst !== chatCardsBefore - 1) {
+    throw new Error(
+      `Expected chat cards ${chatCardsBefore - 1} after move, got ${chatCardsAfterFirst}`
+    );
+  }
+  result.steps.moveNotCopy = true;
 
   const span0 = await pins.first().getAttribute("data-span");
   result.steps.spanDefault = span0;
@@ -58,7 +82,7 @@ try {
   await page.screenshot({ path: resolve(OUT, "canvas-02b-resized.png") });
   result.screenshots.push("canvas-02b-resized.png");
 
-  // Reset to 1 for tidy reorder layout, then pin a second chart
+  // Reset to 1 for tidy reorder layout, then move a second chart
   await resizeBtn.click();
   await page.waitForTimeout(150);
   result.steps.spanAfterSecondCycle = await pins.first().getAttribute("data-span");
@@ -67,12 +91,18 @@ try {
   }
 
   const pinBtnCount = await pinButtons.count();
-  if (pinBtnCount < 2) throw new Error("Need at least 2 fixture pin sources for reorder");
-  await pinButtons.nth(1).click();
+  if (pinBtnCount < 1) throw new Error("Need at least 1 remaining fixture pin source for reorder");
+  const secondCardTestId = await fixtureCards.first().getAttribute("data-testid");
+  await pinButtons.nth(0).click();
   await page.waitForTimeout(400);
   count = await pins.count();
   result.steps.pinCountAfterSecond = count;
   if (count !== 2) throw new Error(`Expected 2 pins, got ${count}`);
+
+  if ((await page.getByTestId(secondCardTestId).count()) !== 0) {
+    throw new Error(`Expected ${secondCardTestId} removed from chat after second move`);
+  }
+  result.steps.secondMovedCard = secondCardTestId;
 
   const orderBefore = await pins.evaluateAll((els) =>
     els.map((el) => el.getAttribute("data-pin-id"))

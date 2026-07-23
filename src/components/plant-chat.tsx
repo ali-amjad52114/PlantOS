@@ -23,11 +23,17 @@ import {
   upsertChatSession,
   type StoredChat,
 } from "@/lib/chat-sessions";
-import { cardDraftFromTower, type CanvasPinDraft } from "@/lib/canvas-pins";
+import { cardDraftFromTower, chatPinSourceKey, questionTowerHideKey, type CanvasPinDraft } from "@/lib/canvas-pins";
 import { normalizeSpec } from "@/lib/catalog";
+import {
+  CHAT_DEFAULT_CHART_LIMIT,
+  CHAT_DEFAULT_READING_LIMIT,
+} from "@/lib/chat-visual-budget";
 import type { PlantTowerPayload } from "@/lib/plant-tower";
 import {
+  deriveTriggerWaitView,
   type TriggerWaitSignals,
+  type TriggerWaitView,
 } from "@/lib/trigger-wait-phases";
 import type { plantAgent } from "@/trigger/plant-agent";
 
@@ -64,6 +70,15 @@ export function PlantChat({
   onPinVisual,
   onTriggerWait,
   fixtureTower = null,
+  movedPinKeys,
+  autoHiddenTowerKey = null,
+  onChatSessionReset,
+  e2eFirstAsk = false,
+  e2eFirstAskBlurb = false,
+  e2eFollowUpTower = null,
+  sessionFirstAskDone = false,
+  onE2eSimFirstAsk,
+  onE2eSimFollowUp,
 }: {
   role: Role;
   /** Persona this chat pane belongs to — sessions are filtered by this. */
@@ -89,6 +104,18 @@ export function PlantChat({
   onTriggerWait?: (signals: TriggerWaitSignals, chatMode: string) => void;
   /** E2E / demo: pinable tower without waiting on the agent. */
   fixtureTower?: PlantTowerPayload | null;
+  /** Keys of chat visuals already moved onto the canvas. */
+  movedPinKeys?: ReadonlySet<string>;
+  /** First-ask auto-landed tower key (`mode:qN` or `role-default-first`) — hide in chat. */
+  autoHiddenTowerKey?: string | null;
+  /** New chat / session switch — reset first-ask placement. */
+  onChatSessionReset?: () => void;
+  e2eFirstAsk?: boolean;
+  e2eFirstAskBlurb?: boolean;
+  e2eFollowUpTower?: PlantTowerPayload | null;
+  sessionFirstAskDone?: boolean;
+  onE2eSimFirstAsk?: () => void | Promise<void>;
+  onE2eSimFollowUp?: () => void | Promise<void>;
 }) {
   const [sessions, setSessions] = useState<StoredChat[]>([]);
   const [chatId, setChatId] = useState(() => newChatId());
@@ -176,6 +203,15 @@ export function PlantChat({
       onPinVisual={onPinVisual}
       onTriggerWait={onTriggerWait}
       fixtureTower={fixtureTower}
+      movedPinKeys={movedPinKeys}
+      autoHiddenTowerKey={autoHiddenTowerKey}
+      e2eFirstAsk={e2eFirstAsk}
+      e2eFirstAskBlurb={e2eFirstAskBlurb}
+      e2eFollowUpTower={e2eFollowUpTower}
+      sessionFirstAskDone={sessionFirstAskDone}
+      onE2eSimFirstAsk={onE2eSimFirstAsk}
+      onE2eSimFollowUp={onE2eSimFollowUp}
+      onChatSessionReset={onChatSessionReset}
     />
   );
 }
@@ -203,6 +239,15 @@ function ChatSession({
   onPinVisual,
   onTriggerWait,
   fixtureTower,
+  movedPinKeys,
+  autoHiddenTowerKey,
+  e2eFirstAsk,
+  e2eFirstAskBlurb,
+  e2eFollowUpTower,
+  sessionFirstAskDone,
+  onE2eSimFirstAsk,
+  onE2eSimFollowUp,
+  onChatSessionReset,
 }: {
   chatId: string;
   role: Role;
@@ -226,6 +271,15 @@ function ChatSession({
   onPinVisual?: (draft: CanvasPinDraft) => void;
   onTriggerWait?: (signals: TriggerWaitSignals, chatMode: string) => void;
   fixtureTower?: PlantTowerPayload | null;
+  movedPinKeys?: ReadonlySet<string>;
+  autoHiddenTowerKey?: string | null;
+  e2eFirstAsk?: boolean;
+  e2eFirstAskBlurb?: boolean;
+  e2eFollowUpTower?: PlantTowerPayload | null;
+  sessionFirstAskDone?: boolean;
+  onE2eSimFirstAsk?: () => void | Promise<void>;
+  onE2eSimFollowUp?: () => void | Promise<void>;
+  onChatSessionReset?: () => void;
 }) {
   const transport = useTriggerChatTransport<typeof plantAgent>({
     task: "plantos-agent",
@@ -326,6 +380,30 @@ function ChatSession({
     : "";
   const lastStreamKey = useRef<string>("");
   const lastBusy = useRef<boolean | null>(null);
+  const waitStartedRef = useRef<number | null>(null);
+  const [chatTick, setChatTick] = useState(0);
+
+  useEffect(() => {
+    if (!busy) return;
+    if (waitStartedRef.current == null) waitStartedRef.current = Date.now();
+    const id = window.setInterval(() => setChatTick((n) => n + 1), 250);
+    return () => window.clearInterval(id);
+  }, [busy]);
+
+  const chatWaitView: TriggerWaitView | null = busy
+    ? deriveTriggerWaitView({
+        chatStatus: status,
+        parts: (([...messages].reverse().find((m) => m.role === "assistant")?.parts ??
+          []) as TriggerWaitSignals["parts"]),
+        elapsedMs: waitStartedRef.current
+          ? Math.max(0, Date.now() - waitStartedRef.current)
+          : 0,
+        chatId,
+      })
+    : null;
+  void chatTick; // refresh labels while busy
+
+  const lastUserMessageId = [...messages].reverse().find((m) => m.role === "user")?.id;
 
   useEffect(() => {
     if (lastBusy.current === busy) return;
@@ -339,7 +417,6 @@ function ChatSession({
     onStreamProgress?.(streamProgress);
   }, [streamProgressKey, streamProgress, onStreamProgress]);
 
-  const waitStartedRef = useRef<number | null>(null);
   useEffect(() => {
     if (!onTriggerWait) return;
     if (busy && waitStartedRef.current == null) waitStartedRef.current = Date.now();
@@ -382,6 +459,7 @@ function ChatSession({
       updatedAt: Date.now(),
     });
     refreshSessions();
+    onChatSessionReset?.();
     onSelectChat(id);
   }
 
@@ -463,23 +541,81 @@ function ChatSession({
             </span>
           </div>
 
-          {populateProgress && (
-            <ChatProgressBar progress={populateProgress} tone="populate" />
-          )}
-          {streamProgress && <ChatProgressBar progress={streamProgress} tone="ask" />}
-
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 text-sm">
+            {e2eFirstAsk && (
+              <div
+                className="flex flex-wrap gap-2"
+                data-testid="e2e-first-ask-controls"
+                data-session-first-ask-done={sessionFirstAskDone ? "1" : "0"}
+              >
+                <button
+                  type="button"
+                  data-testid="e2e-sim-first-ask"
+                  onClick={() => void onE2eSimFirstAsk?.()}
+                  className="rounded-lg border border-border bg-surface-2 px-2 py-1 text-[11px] font-medium"
+                >
+                  E2E first ask
+                </button>
+                <button
+                  type="button"
+                  data-testid="e2e-sim-follow-up"
+                  onClick={() => void onE2eSimFollowUp?.()}
+                  className="rounded-lg border border-border bg-surface-2 px-2 py-1 text-[11px] font-medium"
+                >
+                  E2E follow-up
+                </button>
+              </div>
+            )}
+            {e2eFirstAskBlurb && (
+              <p
+                data-testid="e2e-first-ask-blurb"
+                className="rounded-xl border border-border/70 bg-surface-2/50 px-3 py-2.5 text-[13px] leading-relaxed text-foreground/90"
+              >
+                Plant status looks steady on hydro feed and energy bars — charts for this first ask are on
+                the canvas.
+              </p>
+            )}
+            {e2eFollowUpTower && onPinVisual && (
+              <div className="space-y-2" data-testid="e2e-follow-up-source">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Follow-up charts · stay in chat
+                </p>
+                {e2eFollowUpTower.cards.map((card) => {
+                  const draft = cardDraftFromTower(e2eFollowUpTower, card, "e2e-follow-up");
+                  return (
+                    <PinableVisual
+                      key={card.type}
+                      testId={`e2e-follow-up-card-${card.type}`}
+                      draft={draft}
+                      onPin={onPinVisual}
+                      moved={movedPinKeys?.has(chatPinSourceKey(draft)) ?? false}
+                    >
+                      <LovableCardView
+                        type={card.type}
+                        label={card.label}
+                        hint={card.hint}
+                        binding={card.binding}
+                        compact
+                      />
+                    </PinableVisual>
+                  );
+                })}
+              </div>
+            )}
             {fixtureTower && onPinVisual && (
               <div className="space-y-2" data-testid="canvas-fixture-source">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Fixture cards · pin individually
                 </p>
-                {fixtureTower.cards.map((card) => (
+                {fixtureTower.cards.map((card) => {
+                  const draft = cardDraftFromTower(fixtureTower, card);
+                  return (
                   <PinableVisual
                     key={card.type}
                     testId={`canvas-fixture-card-${card.type}`}
-                    draft={cardDraftFromTower(fixtureTower, card)}
+                    draft={draft}
                     onPin={onPinVisual}
+                    moved={movedPinKeys?.has(chatPinSourceKey(draft)) ?? false}
                   >
                     <LovableCardView
                       type={card.type}
@@ -489,7 +625,8 @@ function ChatSession({
                       compact
                     />
                   </PinableVisual>
-                ))}
+                  );
+                })}
               </div>
             )}
             {messages.length === 0 && (
@@ -517,13 +654,25 @@ function ChatSession({
               </div>
             )}
             {messages.map((m) => (
-              <Message
-                key={m.id}
-                message={m}
-                hideTowers={hideTowersInChat}
-                onPinVisual={onPinVisual}
-              />
+              <div key={m.id} className="space-y-2">
+                <Message
+                  message={m}
+                  hideTowers={hideTowersInChat}
+                  onPinVisual={onPinVisual}
+                  movedPinKeys={movedPinKeys}
+                  autoHiddenTowerKey={autoHiddenTowerKey}
+                />
+                {busy &&
+                  chatWaitView &&
+                  m.role === "user" &&
+                  m.id === lastUserMessageId && (
+                    <ChatTurnProgress view={chatWaitView} />
+                  )}
+              </div>
             ))}
+            {busy && chatWaitView && !lastUserMessageId && (
+              <ChatTurnProgress view={chatWaitView} />
+            )}
             {error && (
               <p className="rounded-lg border border-[color:var(--danger)]/30 bg-[color:var(--danger)]/10 px-3 py-2 text-xs text-[color:var(--danger)]">
                 {/quota|insufficient_quota|billing/i.test(error.message)
@@ -571,49 +720,42 @@ function ChatSession({
   );
 }
 
-function ChatProgressBar({
-  progress,
-  tone,
-}: {
-  progress: PopulateProgress;
-  tone: "populate" | "ask";
-}) {
-  const pct = Math.max(0, Math.min(100, Math.round(progress.percentage)));
+/** Compact Trigger progress under the question that was just asked. */
+function ChatTurnProgress({ view }: { view: TriggerWaitView }) {
+  const pct = Math.max(0, Math.min(100, view.percentage));
+  const elapsed = `${(view.elapsedMs / 1000).toFixed(1)}s`;
   return (
     <div
-      className={
-        tone === "populate"
-          ? "border-b border-border bg-accent/10 px-4 py-2"
-          : "border-b border-border bg-primary/5 px-4 py-2"
-      }
+      data-testid="chat-turn-progress"
+      className="mr-auto max-w-[92%] rounded-xl border border-border/80 bg-surface-2/60 px-3 py-2.5"
+      aria-live="polite"
     >
-      <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
-        <span className="text-foreground/90">
-          {tone === "populate" ? "Populating · " : ""}
-          {progress.label}
-        </span>
-        <span className="tabular text-muted-foreground">{pct}%</span>
+      <div className="mb-1.5 flex items-center gap-2">
+        <Loader2 className="h-3.5 w-3.5 shrink-0 text-primary motion-safe:animate-spin" />
+        <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
+          {view.active?.headline || "Working on Trigger…"}
+        </p>
+        <span className="shrink-0 font-mono text-[10px] tabular text-muted-foreground">{elapsed}</span>
       </div>
-      <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-muted">
+      {view.active?.primitive ? (
+        <p className="mb-1.5 truncate font-mono text-[10px] text-muted-foreground">
+          {view.active.primitive}
+        </p>
+      ) : null}
+      {view.done.length > 0 ? (
+        <div className="mb-1.5 flex flex-col gap-0.5">
+          {view.done.map((s) => (
+            <p key={s.id} className="truncate text-[10px] text-muted-foreground">
+              ✓ {s.headline}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      <div className="h-0.5 overflow-hidden rounded-full bg-muted">
         <div
-          className={`h-full transition-all duration-300 ${
-            tone === "populate" ? "bg-[color:var(--accent)]" : "bg-primary"
-          }`}
+          className="h-full bg-primary transition-[width] duration-300 ease-out"
           style={{ width: `${pct}%` }}
         />
-      </div>
-      <div className="flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-        {progress.steps.map((s) => (
-          <span
-            key={s.id}
-            className={
-              s.done ? "text-primary" : s.active ? "text-foreground/80" : "text-muted-foreground/50"
-            }
-          >
-            {s.done ? "✓ " : s.active ? "● " : "○ "}
-            {s.label}
-          </span>
-        ))}
       </div>
     </div>
   );
@@ -761,10 +903,14 @@ function Message({
   message,
   hideTowers,
   onPinVisual,
+  movedPinKeys,
+  autoHiddenTowerKey,
 }: {
   message: UIMessage;
   hideTowers?: boolean;
   onPinVisual?: (draft: CanvasPinDraft) => void;
+  movedPinKeys?: ReadonlySet<string>;
+  autoHiddenTowerKey?: string | null;
 }) {
   if (message.role === "user") {
     return (
@@ -804,6 +950,8 @@ function Message({
             part={part}
             messageId={message.id}
             onPinVisual={onPinVisual}
+            movedPinKeys={movedPinKeys}
+            autoHiddenTowerKey={autoHiddenTowerKey}
           />
         );
       })}
@@ -815,10 +963,14 @@ function MessagePart({
   part,
   messageId,
   onPinVisual,
+  movedPinKeys,
+  autoHiddenTowerKey,
 }: {
   part: UIMessage["parts"][number];
   messageId: string;
   onPinVisual?: (draft: CanvasPinDraft) => void;
+  movedPinKeys?: ReadonlySet<string>;
+  autoHiddenTowerKey?: string | null;
 }) {
   if (part.type === "text") {
     const text = String(part.text || "").trim();
@@ -864,17 +1016,29 @@ function MessagePart({
   if (part.type === "data-plant-tower") {
     const tower = (part as { data?: PlantTowerPayload }).data;
     if (!tower?.cards?.length) return null;
-    if (!onPinVisual) return <PlantTowerGrid tower={tower} />;
+    if (
+      autoHiddenTowerKey &&
+      questionTowerHideKey(tower) === autoHiddenTowerKey
+    ) {
+      // First ask: charts are on the canvas — blurb stays in text parts only.
+      return null;
+    }
+    const chatCards = tower.cards.slice(0, CHAT_DEFAULT_CHART_LIMIT);
+    const slimTower = { ...tower, cards: chatCards };
+    if (!onPinVisual) return <PlantTowerGrid tower={slimTower} />;
     return (
       <div className="space-y-2">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Lovable Visual {tower.deck} · {tower.deckName} — pin each chart
+          Lovable Visual {tower.deck} · {tower.deckName} — pin to canvas
         </p>
-        {tower.cards.map((card) => (
+        {chatCards.map((card) => {
+          const draft = cardDraftFromTower(tower, card, messageId);
+          return (
           <PinableVisual
             key={card.type}
-            draft={cardDraftFromTower(tower, card, messageId)}
+            draft={draft}
             onPin={onPinVisual}
+            moved={movedPinKeys?.has(chatPinSourceKey(draft)) ?? false}
           >
             <LovableCardView
               type={card.type}
@@ -884,7 +1048,8 @@ function MessagePart({
               compact
             />
           </PinableVisual>
-        ))}
+          );
+        })}
       </div>
     );
   }
@@ -903,7 +1068,11 @@ function MessagePart({
     };
     if (!onPinVisual) return <Visualization spec={spec} />;
     return (
-      <PinableVisual draft={draft} onPin={onPinVisual}>
+      <PinableVisual
+        draft={draft}
+        onPin={onPinVisual}
+        moved={movedPinKeys?.has(chatPinSourceKey(draft)) ?? false}
+      >
         <Visualization spec={spec} />
       </PinableVisual>
     );
@@ -918,6 +1087,7 @@ function MessagePart({
         kind="engineer"
         messageId={messageId}
         onPinVisual={onPinVisual}
+        movedPinKeys={movedPinKeys}
       />
     );
   }
@@ -930,6 +1100,7 @@ function MessagePart({
         kind="operations"
         messageId={messageId}
         onPinVisual={onPinVisual}
+        movedPinKeys={movedPinKeys}
       />
     );
   }
@@ -942,6 +1113,7 @@ function MessagePart({
         kind="finance"
         messageId={messageId}
         onPinVisual={onPinVisual}
+        movedPinKeys={movedPinKeys}
       />
     );
   }
@@ -964,6 +1136,7 @@ function InvestigateBlock({
   kind,
   messageId,
   onPinVisual,
+  movedPinKeys,
 }: {
   label: string;
   spinning?: boolean;
@@ -971,6 +1144,7 @@ function InvestigateBlock({
   kind: "engineer" | "operations" | "finance";
   messageId?: string;
   onPinVisual?: (draft: CanvasPinDraft) => void;
+  movedPinKeys?: ReadonlySet<string>;
 }) {
   if (spinning || !output) {
     return (
@@ -994,7 +1168,7 @@ function InvestigateBlock({
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           {label} findings — pin each tag
         </p>
-        {output.attention.slice(0, 5).map((a: any) => {
+        {output.attention.slice(0, CHAT_DEFAULT_READING_LIMIT).map((a: any) => {
           const draft: CanvasPinDraft = {
             kind: "finding",
             sourceMessageId: messageId,
@@ -1012,7 +1186,12 @@ function InvestigateBlock({
             },
           };
           return (
-            <PinableVisual key={a.tag} draft={draft} onPin={onPinVisual}>
+            <PinableVisual
+              key={a.tag}
+              draft={draft}
+              onPin={onPinVisual}
+              moved={movedPinKeys?.has(chatPinSourceKey(draft)) ?? false}
+            >
               <div className="rounded-lg border border-border/60 bg-surface px-3 py-2">
                 <code className="font-mono text-[11px] font-semibold">{a.tag}</code>
                 <p className="text-[11px] text-muted-foreground">{a.label}</p>
@@ -1039,14 +1218,16 @@ function InvestigateBlock({
     </div>
   );
   if (!onPinVisual) return body;
+  const findingsDraft: CanvasPinDraft = {
+    kind: "findings",
+    sourceMessageId: messageId,
+    payload: { kind: "findings", findings: { label, kind, data: output } },
+  };
   return (
     <PinableVisual
-      draft={{
-        kind: "findings",
-        sourceMessageId: messageId,
-        payload: { kind: "findings", findings: { label, kind, data: output } },
-      }}
+      draft={findingsDraft}
       onPin={onPinVisual}
+      moved={movedPinKeys?.has(chatPinSourceKey(findingsDraft)) ?? false}
     >
       {body}
     </PinableVisual>

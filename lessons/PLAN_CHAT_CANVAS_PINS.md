@@ -13,11 +13,12 @@ User talks in chat; visuals appear there. User can **pin** a visual to the right
 - Canvas layout = **two columns**. Chart footprints:
   - **1 box** — half row (default)
   - **2 wide** — full row (two horizontal boxes)
-- Pin or drag **one chart** from chat; charts snap into order/slots rather than floating pixel coords.
+- Pin or drag **one chart** from chat onto the canvas (**move**, not copy — source leaves chat); charts snap into order/slots rather than floating pixel coords.
 - Drag a pin onto another pin to **swap order**; resize control **cycles** 1 ↔ 2.
 - Live CH refresh updates card **bindings only** — does not reshuffle order/span of other pins; never resurrects dismissed pins.
 - Compact findings UI in chat stays (do not revert to bulky prose).
 - **Ask wait UX** (Trigger ambient progress + receipt on the canvas) is owned by [`PLAN_TRIGGER_WAIT_STATE.md`](./PLAN_TRIGGER_WAIT_STATE.md) — not by this pins plan.
+- **First ask vs follow-up placement** (2 charts on canvas for first ask; later asks keep charts in chat) is owned by [`PLAN_FIRST_ASK_CANVAS.md`](./PLAN_FIRST_ASK_CANVAS.md) — not by this pins plan.
 
 ## DO
 1. `CanvasPin`: `{ id, sourceMessageId?, kind, payload, order, span }` with `span: 1 | 2`.
@@ -50,7 +51,7 @@ User talks in chat; visuals appear there. User can **pin** a visual to the right
 ## Measure of success (DoD)
 - [x] Right stage is **one canvas** (no separate Lovable panel under it).
 - [x] After an Ask / Pin, charts appear **on the canvas** in the 2-column grid.
-- [x] User can **Pin** or drag from chat onto the canvas.
+- [x] User can **Move** or drag from chat onto the canvas (source leaves chat; no duplicate).
 - [x] User can **reorder** by dragging a pin onto another (order swaps).
 - [x] User can **cycle size** 1 ↔ 2-wide via resize control (`data-span`).
 - [x] **X** removes a pin; chat message remains; live refresh does not resurrect dismissed pins.

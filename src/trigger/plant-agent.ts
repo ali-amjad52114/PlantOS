@@ -10,6 +10,7 @@ import { plantClientDataSchema } from "../lib/plant-chat-types";
 import { defaultPlantTower } from "../lib/plant-tower";
 import { engineerSnapshot, financeSnapshot, operationsSnapshot } from "../lib/plant-services";
 import { getReplayControl, tickReplay } from "../lib/replay";
+import { visualPriorityGate } from "../lib/visual-priority";
 import {
   plantChatModel,
   plantPromptModelId,
@@ -147,17 +148,17 @@ const advanceReplay = tool({
 
 const renderVisualization = tool({
   description:
-    "Render charts, tables and stat cards for the user, instead of describing data as text. " +
-    "Pass a json-render spec built from the components listed in the system prompt, with the " +
-    "data rows inlined. Use for supplemental charts after investigation; a Lovable plant tower is " +
-    "already streamed automatically when investigate* tools run.",
+    "OPTIONAL extra visual. Prefer Lovable card types (GeneratorOutput, HydroEnergyBars, …); " +
+    "if none fit use a Replit card; then Ignition (Gauge/TimeSeriesChart); generic LineChart/Stat only as last resort. " +
+    "Call only when the user explicitly asks for another view/chart beyond investigate findings. " +
+    "At most ONE leaf visual. Named cards usually need only optional label/hint — do not invent shadcn+chart layouts.",
   inputSchema: z.object({
     spec: z.object({
       root: z.string().describe("Key of the root element"),
       elements: z.record(
         z.string(),
         z.object({
-          type: z.string().describe("A component name from the system prompt"),
+          type: z.string().describe("Prefer a Lovable card type from the system prompt"),
           props: z.record(z.string(), z.unknown()),
           children: z.array(z.string()).optional().describe("Keys of child elements"),
         })
@@ -174,9 +175,15 @@ const renderVisualization = tool({
       console.warn("renderVisualization spec rejected:", result.errors);
       return { ok: false, errors: result.errors };
     }
+    const priority = visualPriorityGate(normalized);
+    if (!priority.ok) {
+      console.warn("renderVisualization priority rejected:", priority.errors);
+      return { ok: false, errors: priority.errors };
+    }
     return {
       ok: true,
-      note: "Rendered to the user. Don't repeat the data as text — add at most a one-sentence takeaway.",
+      family: priority.family,
+      note: "Rendered to the user. Don't repeat the data as text — add at most a one-sentence takeaway. Do not call renderVisualization again unless the user asked for more charts.",
     };
   },
 });
@@ -244,16 +251,19 @@ Role context:
 - Only the matching investigate* tool is available this turn — call it for plant questions in that role.
 - Live feed questions → call getLivePlantStatus. advanceReplay is only available when explicitly enabled; prefer not to tick the plant yourself.
 
-Presenting results:
-- Calling the role investigate tool **automatically streams a 4-card Lovable plant tower** into the chat (durable). Do not describe that tower as a markdown table.
-- The UI already renders a compact findings list from the tool output — do **not** restate tag values, ranges, or long explanations.
-- Optionally call renderVisualization **once** for an extra chart/table if the tower is not enough.
+Presenting results — **chat visual budget (strict by default)**:
+- **Visual priority (required):** Lovable cards → Replit cards → Ignition plant-viz → generic charts/shadcn. Never invent custom AI cards when a named catalog card fits.
+- Do **not** bombard the chat with charts or data blocks. Typical / preloaded plant questions need at most **1 chart** and about **4 readings** (never more than 2 charts or 4 readings unless the user clearly asks for a broader pack).
+- Calling the role investigate tool streams a Lovable plant tower; the **chat UI shows only one chart** from it by default. Do not describe the tower as a markdown table.
+- The UI already renders a compact findings list (capped ~4 readings) from the tool output — do **not** restate tag values, ranges, or long explanations.
+- **Do not** call renderVisualization unless the user **explicitly** asks for a chart, another view, or more visuals. When you do: **once**, prefer a **single Lovable card** type as the root (label/hint only). Fall back to Replit, then Ignition, then generic — in that order.
+- If the user asks for many charts or a full dashboard, then you may add more — that is the exception.
 - After tools, reply with **only** a short recommendation (1 sentence, or at most 3 tight bullets). No preamble ("I'll investigate…"), no paragraphs, no repeating numbers already shown in the findings UI.
 - Production and finance dollar figures are SYNTHETIC DEMO ASSUMPTIONS — say so briefly when discussing money.
 - Never invent tag values. If a tool fails, report the error.
 - Dataset: HAI normal-op (train1), production signal tag P4_ST_PO (steam turbine power MW).
 
-## renderVisualization spec reference (optional supplemental)
+## renderVisualization spec reference (only when user asks for an extra chart)
 
 {{componentReference}}`,
 });

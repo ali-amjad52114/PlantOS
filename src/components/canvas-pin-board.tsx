@@ -2,7 +2,7 @@
 
 import type { ReactNode, DragEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import { GripVertical, Maximize2, Pin, X } from "lucide-react";
+import { GripVertical, Maximize2, Pin, X, ZoomIn } from "lucide-react";
 import { LovableCardView, chartHeightForSpan } from "@/components/lovable-viz/LovableCardView";
 import { FindingsBody } from "@/components/plant-chat-findings";
 import { PlantTowerGrid } from "@/components/plant-tower-grid";
@@ -15,7 +15,6 @@ import {
   normalizeSpan,
   setPinSpan,
   sortedPins,
-  spanLabel,
   swapPinOrder,
   type CanvasPin,
   type CanvasPinDraft,
@@ -206,12 +205,6 @@ function CanvasGridCell({
   const span: CanvasSpan = pin.span === 2 ? 2 : 1;
   const spanClass =
     span === 2 ? "col-span-1 row-span-1 sm:col-span-2" : "col-span-1 row-span-1";
-  const title =
-    pin.payload.kind === "card"
-      ? pin.payload.card.label || pin.payload.card.type
-      : pin.payload.kind === "finding"
-        ? pin.payload.item.tag
-        : pin.kind;
   const caption = captionLinesForPin(pin);
 
   return (
@@ -219,6 +212,9 @@ function CanvasGridCell({
       data-testid="canvas-pin"
       data-pin-id={pin.id}
       data-span={span}
+      data-card-type={
+        pin.payload.kind === "card" ? pin.payload.card.type : pin.payload.kind
+      }
       onDragOver={onDragOverCell}
       onDragLeave={onDragLeaveCell}
       onDrop={onDropOnCell}
@@ -236,13 +232,7 @@ function CanvasGridCell({
         className="flex shrink-0 cursor-grab items-center gap-1.5 border-b border-border bg-surface-2/90 px-2 py-1.5 active:cursor-grabbing"
         title="Drag to swap place with another chart"
       >
-        <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {title}
-        </span>
-        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] tabular text-muted-foreground">
-          {spanLabel(span)}
-        </span>
+        <GripVertical className="mr-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <button
           type="button"
           data-testid="canvas-pin-resize"
@@ -263,9 +253,10 @@ function CanvasGridCell({
             e.stopPropagation();
             onFocus();
           }}
-          className="rounded px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Zoom chart"
+          className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
-          Zoom
+          <ZoomIn className="h-3.5 w-3.5" />
         </button>
         <button
           type="button"
@@ -347,15 +338,20 @@ export function PinableVisual({
   onPin,
   children,
   testId,
+  moved = false,
 }: {
   draft: CanvasPinDraft;
   onPin?: (draft: CanvasPinDraft) => void;
   children: ReactNode;
   testId?: string;
+  /** When true, this chat visual was moved to the canvas — do not render a copy. */
+  moved?: boolean;
 }) {
+  if (moved) return null;
+
   function onDragStart(e: DragEvent) {
     e.dataTransfer.setData(CANVAS_DND_MIME, JSON.stringify(draft));
-    e.dataTransfer.effectAllowed = "copy";
+    e.dataTransfer.effectAllowed = "move";
   }
 
   return (
@@ -367,11 +363,11 @@ export function PinableVisual({
         draggable
         onDragStart={onDragStart}
         className="flex cursor-grab items-center justify-end gap-1 border-b border-border/60 bg-surface-2/50 px-2 py-1.5 active:cursor-grabbing"
-        title="Drag onto the canvas"
+        title="Move onto the canvas"
       >
         <GripVertical className="mr-auto h-3.5 w-3.5 text-muted-foreground" />
         <span className="mr-auto text-[10px] uppercase tracking-wide text-muted-foreground">
-          Drag to canvas
+          Move to canvas
         </span>
         <button
           type="button"
@@ -380,7 +376,7 @@ export function PinableVisual({
           className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-foreground hover:border-primary/40 hover:bg-primary/5"
         >
           <Pin className="h-3 w-3" />
-          Pin
+          Move
         </button>
       </div>
       <div className="p-2">{children}</div>

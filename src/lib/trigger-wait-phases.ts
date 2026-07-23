@@ -27,7 +27,7 @@ export type TriggerWaitReceipt = {
 export type TriggerWaitView = {
   mode: "active" | "receipt";
   active: TriggerWaitPhase | null;
-  /** At most the last two completed phases. */
+  /** All completed phases in order (never drop older ones). */
   done: TriggerWaitPhase[];
   /** 0–100 ambient bar. */
   percentage: number;
@@ -158,7 +158,7 @@ function phaseById(id: TriggerWaitPhaseId, toolName?: string | null): TriggerWai
 }
 
 /**
- * Map Ask chat signals → ambient wait view (1 active + ≤2 done, or receipt).
+ * Map Ask chat signals → ambient wait view (1 active + full done trail, or receipt).
  */
 export function deriveTriggerWaitView(signals: TriggerWaitSignals): TriggerWaitView {
   const elapsedMs = Math.max(0, signals.elapsedMs ?? 0);
@@ -195,8 +195,6 @@ export function deriveTriggerWaitView(signals: TriggerWaitSignals): TriggerWaitV
     reached.push("binding");
   }
 
-  const toolForCopy = activeTool || toolNames[toolNames.length - 1] || null;
-
   // Receipt when Trigger is idle and we finished a turn, and we're not mid-bind.
   // Binding stays on "active" ladder until CH bind clears.
   if (!busy && auditComplete && !binding) {
@@ -214,10 +212,13 @@ export function deriveTriggerWaitView(signals: TriggerWaitSignals): TriggerWaitV
       typeof auditComplete.turn === "number" ? `turn ${auditComplete.turn}` : "",
     ].filter(Boolean);
 
+    const toolForCopy = activeTool || toolNames[toolNames.length - 1] || null;
+    const allDone = reached.map((id) => phaseById(id, toolForCopy));
+
     return {
       mode: "receipt",
       active: null,
-      done: [],
+      done: allDone,
       percentage: 100,
       elapsedMs: auditComplete.elapsedMs ?? elapsedMs,
       receipt: {
@@ -231,10 +232,12 @@ export function deriveTriggerWaitView(signals: TriggerWaitSignals): TriggerWaitV
     };
   }
 
+  const toolForCopy = activeTool || toolNames[toolNames.length - 1] || null;
+
   const activeId = reached[reached.length - 1]!;
   const active = phaseById(activeId, toolForCopy);
-  const prior = reached.slice(0, -1).map((id) => phaseById(id, toolForCopy));
-  const done = prior.slice(-2);
+  // Keep every completed phase visible — timings are attached in the UI layer.
+  const done = reached.slice(0, -1).map((id) => phaseById(id, toolForCopy));
 
   const index = LADDER.findIndex((p) => p.id === activeId);
   const percentage = Math.min(96, Math.round(((index + 1) / LADDER.length) * 100));

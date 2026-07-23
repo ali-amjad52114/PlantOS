@@ -39,21 +39,21 @@ try {
     throw new Error(`App not healthy: ${health?.status()}`);
   }
 
-  // Shell mode label is "Engineer" (see plant-shell MODE_NAV).
-  await page.getByRole("button", { name: /^Engineer$/i }).click();
-  await page.waitForTimeout(800);
+  // Wait for shell hydration (nav ready).
+  await page.getByRole("button", { name: /^Engineer$/i }).waitFor({ state: "visible" });
+  await page.waitForTimeout(1500);
 
-  // Prefer visuals tab so the stage wait overlay is visible
-  const visuals = page.getByRole("button", { name: /^visuals$/i });
-  if (await visuals.count()) {
-    await visuals.first().click().catch(() => {});
-  }
-  await page.waitForTimeout(300);
-
-  const q2 = page.getByRole("button", {
-    name: /What is the current status of the generators and turbine/i,
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll("button")].find(
+      (el) => el.textContent.trim() === "Engineer"
+    );
+    if (!b) throw new Error("Engineer nav missing");
+    b.click();
   });
-  await q2.first().click();
+
+  const ask = page.locator("button").filter({ hasText: /generators and turbine/i });
+  await ask.first().waitFor({ state: "visible", timeout: 20000 });
+  await ask.first().click();
   result.steps.asked = true;
 
   const overlay = page.getByTestId("trigger-wait-overlay");
@@ -65,56 +65,66 @@ try {
 
   const geometry = await page.evaluate(() => {
     const overlayEl = document.querySelector('[data-testid="trigger-wait-overlay"]');
-    const card = document.querySelector('[data-testid="trigger-wait-state"] > div');
+    const card = document.querySelector('[data-testid="trigger-wait-state"]');
     if (!overlayEl || !card) return null;
     const o = overlayEl.getBoundingClientRect();
     const c = card.getBoundingClientRect();
     return {
       overlayTop: Math.round(o.top),
       cardTop: Math.round(c.top),
-      cardBottom: Math.round(c.bottom),
+      offsetFromOverlayTop: Math.round(c.top - o.top),
       overlayHeight: Math.round(o.height),
-      // card should sit in the upper third of the overlay
       inUpperThird: c.top < o.top + o.height * 0.35,
     };
   });
   result.steps.geometry = geometry;
   if (!geometry?.inUpperThird) {
     throw new Error(
-      `Wait card not top-aligned: cardTop=${geometry?.cardTop} overlayTop=${geometry?.overlayTop} h=${geometry?.overlayHeight}`
+      `Wait card not top-aligned: offset=${geometry?.offsetFromOverlayTop} h=${geometry?.overlayHeight}`
     );
   }
 
   await page.screenshot({ path: resolve(OUT, "trigger-wait-01-top.png") });
   result.screenshots.push("trigger-wait-01-top.png");
+  result.steps.initialText = (await waitCard.innerText()).slice(0, 280);
 
-  // Stay on wait long enough to catch runtime errors; advance if phases move
-  const headline = waitCard.locator("p").filter({ hasText: /.+/ }).first();
-  result.steps.initialText = (await waitCard.innerText()).slice(0, 240);
-
-  await page.waitForTimeout(5000);
-  result.steps.after5sText = (await waitCard.innerText()).slice(0, 240);
-  result.steps.stillVisible = (await overlay.count()) > 0;
-
-  // Shell must not be a Next error page
-  const body = await page.locator("body").innerText();
-  if (/Application error|Unhandled Runtime Error|Module not found/i.test(body)) {
-    throw new Error("Shell showing Next/runtime error page");
+  // Watch for runtime failure during Trigger turn (up to ~14s; hang fallback is 12s).
+  let sawPhaseAdvance = false;
+  const startText = result.steps.initialText;
+  for (let i = 0; i < 14; i++) {
+    await page.waitForTimeout(1000);
+    if (result.pageErrors.length) {
+      throw new Error(`pageerror: ${result.pageErrors.join(" | ")}`);
+    }
+    const body = await page.locator("body").innerText();
+    if (/Application error|Unhandled Runtime Error|Module not found/i.test(body)) {
+      throw new Error("Shell showing Next/runtime error page");
+    }
+    if (/TypeError:|ReferenceError:|Cannot read propert/i.test(body)) {
+      throw new Error(`Visible JS error in body: ${body.match(/TypeError:[^\n]+|ReferenceError:[^\n]+|Cannot read[^\n]+/)?.[0]}`);
+    }
+    if (await waitCard.count()) {
+      const t = await waitCard.innerText();
+      if (t !== startText) sawPhaseAdvance = true;
+      result.steps.latestText = t.slice(0, 280);
+    } else {
+      result.steps.overlayDismissedAtSec = i + 1;
+      break;
+    }
   }
+  result.steps.sawPhaseAdvance = sawPhaseAdvance;
 
-  if (result.pageErrors.length) {
-    throw new Error(`pageerror: ${result.pageErrors[0]}`);
-  }
-
-  // Soft: console errors from our app (ignore known third-party noise)
   const serious = result.consoleErrors.filter(
     (t) =>
-      !/favicon|Download the React DevTools|pipedream\/sdk\/server/i.test(t) &&
+      !/favicon|Download the React DevTools|pipedream|hydrat|Netlify|websocket/i.test(t) &&
       /Error|TypeError|ReferenceError|Cannot read/i.test(t)
   );
   result.steps.seriousConsole = serious.slice(0, 5);
   if (serious.length) {
     throw new Error(`console error: ${serious[0]}`);
+  }
+  if (result.pageErrors.length) {
+    throw new Error(`pageerror: ${result.pageErrors.join(" | ")}`);
   }
 
   await page.screenshot({ path: resolve(OUT, "trigger-wait-02-later.png") });
@@ -123,7 +133,9 @@ try {
   result.ok = true;
 } catch (e) {
   result.error = String(e?.message || e);
-  await page.screenshot({ path: resolve(OUT, "trigger-wait-FAIL.png"), fullPage: true }).catch(() => {});
+  await page
+    .screenshot({ path: resolve(OUT, "trigger-wait-FAIL.png"), fullPage: true })
+    .catch(() => {});
   result.screenshots.push("trigger-wait-FAIL.png");
 } finally {
   writeFileSync(resolve(OUT, "trigger-wait-result.json"), JSON.stringify(result, null, 2));

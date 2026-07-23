@@ -18,13 +18,16 @@ export type OutboundIntentStatus =
   | "cancelled"
   | "reverted";
 
+export type OutboundConnector = "slack" | "gmail" | "sheets" | "docs" | "slides";
+
 export type OutboundIntent = {
   intentId: string;
-  connector: "slack";
-  actionKey: "slack.send_message" | "slack.undo_message";
+  connector: OutboundConnector;
+  actionKey: string;
   status: OutboundIntentStatus;
   title: string;
   body: string;
+  /** Slack channel id, or Google destination id (folder / spreadsheet). */
   channelId: string;
   channelLabel: string;
   accountId?: string;
@@ -34,6 +37,11 @@ export type OutboundIntent = {
     channel?: string;
     rawSummary?: string;
     fileIds?: string[];
+    /** Google artifact links */
+    url?: string;
+    spreadsheetId?: string;
+    documentId?: string;
+    presentationId?: string;
   };
   /** Number of chart PNGs saved under data/outbound/images/{intentId} */
   imageCount?: number;
@@ -64,12 +72,25 @@ export function createIntent(input: {
   body: string;
   channelId: string;
   channelLabel: string;
+  connector?: OutboundConnector;
+  actionKey?: string;
 }): OutboundIntent {
+  const connector = input.connector || "slack";
   const now = new Date().toISOString();
   const intent: OutboundIntent = {
     intentId: randomUUID(),
-    connector: "slack",
-    actionKey: "slack.send_message",
+    connector,
+    actionKey:
+      input.actionKey ||
+      (connector === "slack"
+        ? "slack.send_message"
+        : connector === "gmail"
+          ? "gmail.send"
+          : connector === "sheets"
+            ? "sheets.create"
+            : connector === "docs"
+              ? "docs.create"
+              : "slides.create"),
     status: "drafted",
     title: input.title,
     body: input.body,

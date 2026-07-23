@@ -16,8 +16,11 @@ import { useRealtimeInvestigate } from "@/hooks/useRealtimeInvestigate";
 import { useRealtimeReplay } from "@/hooks/useRealtimeReplay";
 import {
   clearDismissedForBoundQuestion,
+  chatPinSourceKey,
   createPin,
   expandTowerIntoCardPins,
+  FIRST_ASK_CANVAS_CARD_COUNT,
+  questionTowerHideKey,
   upsertBoundTowerAsCards,
   type CanvasPin,
   type CanvasPinDraft,
@@ -96,6 +99,8 @@ export default function PlantOSPage() {
   const [awaitingQuestion, setAwaitingQuestion] = useState<string | null>(null);
   const [awaitingMode, setAwaitingMode] = useState<ShellMode | null>(null);
   const [canvasPins, setCanvasPins] = useState<CanvasPin[]>([]);
+  /** Chat visuals that were moved onto the canvas (no longer shown in chat). */
+  const [movedChatPinKeys, setMovedChatPinKeys] = useState<Set<string>>(() => new Set());
   const [triggerWait, setTriggerWait] = useState<TriggerWaitView | null>(null);
   const [waitStartedAt, setWaitStartedAt] = useState<number | null>(null);
   const [chBinding, setChBinding] = useState(false);
@@ -103,6 +108,15 @@ export default function PlantOSPage() {
   const chBindingRef = useRef(false);
   chBindingRef.current = chBinding;
   const [e2eCanvas, setE2eCanvas] = useState(false);
+  const [e2eFirstAsk, setE2eFirstAsk] = useState(false);
+  /** Per chat session: first ask already placed (or completed without cards). */
+  const sessionFirstAskDoneRef = useRef(false);
+  const [sessionFirstAskDone, setSessionFirstAskDone] = useState(false);
+  /** Hide this question-map tower in chat after first-ask auto-land (`mode:qN`). */
+  const [autoHiddenTowerKey, setAutoHiddenTowerKey] = useState<string | null>(null);
+  /** E2E: follow-up charts shown in chat only (no auto canvas). */
+  const [e2eFollowUpTower, setE2eFollowUpTower] = useState<PlantTowerPayload | null>(null);
+  const [e2eFirstAskBlurb, setE2eFirstAskBlurb] = useState(false);
   /** Pins the user removed — live CH refresh must not resurrect them. */
   const dismissedPinIdsRef = useRef<Set<string>>(new Set());
   const askBridgeRef = useRef<((q: string) => void) | null>(null);
@@ -124,36 +138,73 @@ export default function PlantOSPage() {
 
   useEffect(() => {
     try {
-      setE2eCanvas(new URLSearchParams(window.location.search).get("e2eCanvas") === "1");
+      const params = new URLSearchParams(window.location.search);
+      setE2eCanvas(params.get("e2eCanvas") === "1");
+      setE2eFirstAsk(params.get("e2eFirstAsk") === "1");
     } catch {
       setE2eCanvas(false);
+      setE2eFirstAsk(false);
     }
   }, []);
 
-  const pinVisual = useCallback((draft: CanvasPinDraft) => {
-    setCanvasPins((prev) => {
-      if (draft.payload.kind === "tower") {
-        return expandTowerIntoCardPins(prev, draft.payload.tower, draft.sourceMessageId);
-      }
-      // Explicit pin from chat — allow this id again if it was dismissed.
-      if (draft.payload.kind === "card" && draft.payload.meta?.questionIndex != null) {
-        const mode = draft.payload.meta.mode ?? draft.payload.meta.role ?? "";
-        const id = `bound_${mode}_q${draft.payload.meta.questionIndex}_${draft.payload.card.type}`;
-        dismissedPinIdsRef.current.delete(id);
-      }
-      return [...prev, createPin(draft, prev)];
-    });
-    setMobileTab("visuals");
+  const resetChatSessionFirstAsk = useCallback(() => {
+    sessionFirstAskDoneRef.current = false;
+    setSessionFirstAskDone(false);
+    setAutoHiddenTowerKey(null);
+    setE2eFollowUpTower(null);
+    setE2eFirstAskBlurb(false);
   }, []);
 
-  const dropPinDraft = useCallback((draft: CanvasPinDraft) => {
-    setCanvasPins((prev) => {
-      if (draft.payload.kind === "tower") {
-        return expandTowerIntoCardPins(prev, draft.payload.tower, draft.sourceMessageId);
-      }
-      return [...prev, createPin(draft, prev)];
+  const landFirstAskTower = useCallback((tower: PlantTowerPayload) => {
+    setCanvasPins((prev) =>
+      upsertBoundTowerAsCards(prev, tower, dismissedPinIdsRef.current, {
+        maxCards: FIRST_ASK_CANVAS_CARD_COUNT,
+        addMissing: true,
+      })
+    );
+    setAutoHiddenTowerKey(questionTowerHideKey(tower));
+  }, []);
+
+  const markChatVisualMoved = useCallback((draft: CanvasPinDraft) => {
+    setMovedChatPinKeys((prev) => {
+      const next = new Set(prev);
+      next.add(chatPinSourceKey(draft));
+      return next;
     });
   }, []);
+
+  const pinVisual = useCallback(
+    (draft: CanvasPinDraft) => {
+      markChatVisualMoved(draft);
+      setCanvasPins((prev) => {
+        if (draft.payload.kind === "tower") {
+          return expandTowerIntoCardPins(prev, draft.payload.tower, draft.sourceMessageId);
+        }
+        // Explicit pin from chat — allow this id again if it was dismissed.
+        if (draft.payload.kind === "card" && draft.payload.meta?.questionIndex != null) {
+          const mode = draft.payload.meta.mode ?? draft.payload.meta.role ?? "";
+          const id = `bound_${mode}_q${draft.payload.meta.questionIndex}_${draft.payload.card.type}`;
+          dismissedPinIdsRef.current.delete(id);
+        }
+        return [...prev, createPin(draft, prev)];
+      });
+      setMobileTab("visuals");
+    },
+    [markChatVisualMoved]
+  );
+
+  const dropPinDraft = useCallback(
+    (draft: CanvasPinDraft) => {
+      markChatVisualMoved(draft);
+      setCanvasPins((prev) => {
+        if (draft.payload.kind === "tower") {
+          return expandTowerIntoCardPins(prev, draft.payload.tower, draft.sourceMessageId);
+        }
+        return [...prev, createPin(draft, prev)];
+      });
+    },
+    [markChatVisualMoved]
+  );
 
   const onCanvasPinsChange = useCallback((next: CanvasPin[]) => {
     setCanvasPins((prev) => {
@@ -166,15 +217,10 @@ export default function PlantOSPage() {
     });
   }, []);
 
-  const applyBoundTowerPins = useCallback((tower: PlantTowerPayload) => {
-    setCanvasPins((prev) =>
-      upsertBoundTowerAsCards(prev, tower, dismissedPinIdsRef.current)
-    );
-  }, []);
-
+  /** E2E / demo fixture for pin board only — not used for first-ask placement proof. */
   const fixtureTower = useMemo(
-    () => (e2eCanvas ? defaultPlantTower("engineer") : null),
-    [e2eCanvas]
+    () => (e2eCanvas && !e2eFirstAsk ? defaultPlantTower("engineer") : null),
+    [e2eCanvas, e2eFirstAsk]
   );
 
   const refreshLive = useCallback(async () => {
@@ -279,7 +325,9 @@ export default function PlantOSPage() {
         setTower(payload);
         setTowersByMode((prev) => ({ ...prev, [mode]: payload }));
         setCanvasPins((prev) =>
-          upsertBoundTowerAsCards(prev, payload as PlantTowerPayload, dismissedPinIdsRef.current)
+          upsertBoundTowerAsCards(prev, payload as PlantTowerPayload, dismissedPinIdsRef.current, {
+            addMissing: false,
+          })
         );
       } catch {
         /* ignore */
@@ -497,9 +545,16 @@ export default function PlantOSPage() {
       }
     };
 
-    // Unmapped ask: Trigger finished — apply held agent visuals; towers stay in chat for pin.
+    // Unmapped ask: Trigger finished — apply held agent visuals; first ask may land ≤2 tower cards.
     if (pending.q == null) {
+      const heldTower = heldTowerRef.current;
       heldTowerRef.current = null;
+      const isFirst = !sessionFirstAskDoneRef.current;
+      sessionFirstAskDoneRef.current = true;
+      setSessionFirstAskDone(true);
+      if (isFirst && heldTower?.cards?.length) {
+        landFirstAskTower(heldTower);
+      }
       flushHeldVisual(modeRef.current === "overview" ? "engineer" : modeRef.current);
       setChBinding(false);
       setStageProgress(null);
@@ -526,7 +581,25 @@ export default function PlantOSPage() {
       heldTowerRef.current = null;
       setTower(payload);
       setTowersByMode((prev) => ({ ...prev, [pending.mode]: payload }));
-      applyBoundTowerPins(payload as PlantTowerPayload);
+
+      const isFirst = !sessionFirstAskDoneRef.current;
+      sessionFirstAskDoneRef.current = true;
+      setSessionFirstAskDone(true);
+      if (isFirst) {
+        // First ask: exactly 2 question-map cards on canvas; none in chat.
+        landFirstAskTower(payload as PlantTowerPayload);
+      } else {
+        // Follow-up: refresh bindings on existing pins only — no auto-land.
+        setCanvasPins((prev) =>
+          upsertBoundTowerAsCards(
+            prev,
+            payload as PlantTowerPayload,
+            dismissedPinIdsRef.current,
+            { addMissing: false }
+          )
+        );
+      }
+
       flushHeldVisual(pending.mode);
       setError(null);
       setChBinding(false);
@@ -585,7 +658,7 @@ export default function PlantOSPage() {
       heldVisualRef.current = null;
       heldTowerRef.current = null;
     }
-  }, [applyBoundTowerPins, waitStartedAt]);
+  }, [landFirstAskTower, waitStartedAt]);
 
   const onTriggerWait = useCallback((signals: TriggerWaitSignals, chatMode: string) => {
     if (!awaitingBindRef.current || awaitingBindRef.current.mode !== chatMode) return;
@@ -732,6 +805,30 @@ export default function PlantOSPage() {
     // Cards land only after Trigger finishes (onAgentBusyChange) — or the hang timeout below.
   }
 
+  const runE2eSimFirstAsk = useCallback(async () => {
+    setError(null);
+    setMode("engineer");
+    const r = await fetch("/api/plant/bound-tower?mode=engineer&q=0");
+    const payload = await readJson(r);
+    if (payload?.error) throw new Error(payload.error);
+    setTower(payload);
+    setTowersByMode((prev) => ({ ...prev, engineer: payload }));
+    sessionFirstAskDoneRef.current = true;
+    setSessionFirstAskDone(true);
+    landFirstAskTower(payload as PlantTowerPayload);
+    setE2eFirstAskBlurb(true);
+    setE2eFollowUpTower(null);
+    setMobileTab("visuals");
+  }, [landFirstAskTower]);
+
+  const runE2eSimFollowUp = useCallback(async () => {
+    const r = await fetch("/api/plant/bound-tower?mode=engineer&q=1");
+    const payload = await readJson(r);
+    if (payload?.error) throw new Error(payload.error);
+    // Follow-up: charts in chat only — do not auto-land on canvas.
+    setE2eFollowUpTower(payload as PlantTowerPayload);
+  }, []);
+
   const view = mode === "overview" ? null : data ?? agentVisuals[mode] ?? null;
   const stageTower = tower ?? towersByMode[mode] ?? null;
   const feedLabel = feedActive ? "LIVE" : live?.control?.playing ? "STALE" : "PAUSED";
@@ -877,7 +974,16 @@ export default function PlantOSPage() {
           onAgentBusyChange={onAgentBusyChange}
           onAgentError={onAgentError}
           onPinVisual={pinVisual}
+          movedPinKeys={movedChatPinKeys}
           fixtureTower={fixtureTower}
+          autoHiddenTowerKey={autoHiddenTowerKey}
+          onChatSessionReset={resetChatSessionFirstAsk}
+          e2eFirstAsk={e2eFirstAsk}
+          e2eFirstAskBlurb={e2eFirstAskBlurb}
+          e2eFollowUpTower={e2eFollowUpTower}
+          sessionFirstAskDone={sessionFirstAskDone}
+          onE2eSimFirstAsk={runE2eSimFirstAsk}
+          onE2eSimFollowUp={runE2eSimFollowUp}
         />
       }
       stage={

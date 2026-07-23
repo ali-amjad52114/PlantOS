@@ -73,6 +73,21 @@ export type CanvasPinDraft = {
   sourceMessageId?: string;
 };
 
+/** Stable key so chat can hide a visual after it is moved onto the canvas. */
+export function chatPinSourceKey(draft: CanvasPinDraft): string {
+  const src = draft.sourceMessageId ?? "nosrc";
+  const p = draft.payload;
+  if (p.kind === "card") return `card:${src}:${p.card.type}`;
+  if (p.kind === "finding") return `finding:${src}:${p.item.tag}`;
+  if (p.kind === "viz") return `viz:${src}:${p.spec.root || "root"}`;
+  if (p.kind === "tower") {
+    const mode = p.tower.mode ?? p.tower.role ?? "role";
+    return `tower:${src}:${mode}:q${p.tower.questionIndex ?? 0}:d${p.tower.deck}`;
+  }
+  if (p.kind === "findings") return `findings:${src}:${p.findings.kind}`;
+  return `${draft.kind}:${src}`;
+}
+
 export function newPinId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `pin_${crypto.randomUUID()}`;
@@ -145,17 +160,24 @@ export function boundCardPinId(tower: PlantTowerPayload, cardType: string) {
 /**
  * Land / refresh a bound tower as independent card pins on the grid.
  * Updates bindings only — never changes order/span; never resurrects dismissed ids.
+ * @param opts.maxCards — only consider the first N cards (first-ask = 2).
+ * @param opts.addMissing — if false, only refresh bindings on pins already on the board.
  */
 export function upsertBoundTowerAsCards(
   existing: CanvasPin[],
   tower: PlantTowerPayload,
-  dismissedIds?: ReadonlySet<string>
+  dismissedIds?: ReadonlySet<string>,
+  opts?: { maxCards?: number; addMissing?: boolean }
 ): CanvasPin[] {
   let next = [...existing];
   const legacyId = `bound_${tower.mode ?? tower.role}_q${tower.questionIndex ?? 0}`;
   next = next.filter((p) => p.id !== legacyId);
 
-  tower.cards.forEach((card) => {
+  const addMissing = opts?.addMissing !== false;
+  const cards =
+    opts?.maxCards != null ? tower.cards.slice(0, opts.maxCards) : tower.cards;
+
+  cards.forEach((card) => {
     const id = boundCardPinId(tower, card.type);
     const payload: CanvasPinPayload = {
       kind: "card",
@@ -174,6 +196,7 @@ export function upsertBoundTowerAsCards(
       next[idx] = { ...next[idx], kind: "card", payload };
       return;
     }
+    if (!addMissing) return;
     if (dismissedIds?.has(id)) return;
 
     next.push({
@@ -185,6 +208,19 @@ export function upsertBoundTowerAsCards(
     });
   });
   return next;
+}
+
+/** First ask lands exactly this many question-relevant charts on the canvas. */
+export const FIRST_ASK_CANVAS_CARD_COUNT = 2;
+
+export function questionTowerHideKey(
+  tower: Pick<PlantTowerPayload, "mode" | "role" | "questionIndex" | "source" | "deck">
+) {
+  if (tower.source === "role-default") {
+    return `role-default:${tower.role}:d${tower.deck ?? 0}`;
+  }
+  const mode = tower.mode ?? tower.role;
+  return `${mode}:q${tower.questionIndex ?? 0}`;
 }
 
 export function clearDismissedForBoundQuestion(

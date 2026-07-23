@@ -9,7 +9,9 @@ import type { ShellMode } from "@/components/plant-shell";
 import type { CanvasPin, CanvasPinDraft } from "@/lib/canvas-pins";
 import type { TriggerWaitView } from "@/lib/trigger-wait-phases";
 import type { PlantTowerPayload } from "@/lib/plant-tower";
+import { formatPacificTimestamp } from "@/lib/format-time";
 import { MODE_QUESTIONS } from "@/lib/shell-prompts";
+import { buildPackFromPins, formatPackNarrative } from "@/lib/outbound/pack";
 
 type AgentRole = "engineer" | "operations" | "finance";
 
@@ -68,6 +70,8 @@ export function VisualStage({
 
   const shareDraft = (() => {
     if (canvasPins.length > 0) {
+      const packTitle = `${title} · ${canvasPins.length} chart${canvasPins.length === 1 ? "" : "s"}`;
+      const pack = buildPackFromPins(packTitle, canvasPins, 4);
       const lines = canvasPins.slice(0, 6).map((p, i) => {
         if (p.payload.kind === "card") {
           const c = p.payload.card;
@@ -87,14 +91,16 @@ export function VisualStage({
         return `${i + 1}. ${p.kind} pin`;
       });
       return {
-        title: `${title} · ${canvasPins.length} chart${canvasPins.length === 1 ? "" : "s"}`,
-        body: `${lines.join("\n")}\n\nLive max: ${live?.live?.max_ts ?? "—"}`,
+        title: packTitle,
+        body: `${lines.join("\n")}\n\nLatest reading: ${formatPacificTimestamp(live?.live?.max_ts)} PT`,
+        pack,
+        googleBody: formatPackNarrative(pack),
       };
     }
     if (mode === "overview" && overview) {
       return {
         title: "Plant overview",
-        body: `PlantOS overview snapshot at ${live?.live?.max_ts ?? "now"}.`,
+        body: `PlantOS overview snapshot at ${formatPacificTimestamp(live?.live?.max_ts)} PT.`,
       };
     }
     return {
@@ -107,20 +113,15 @@ export function VisualStage({
 
   return (
     <div className="card-surface flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Canvas</p>
-          <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-        </div>
-        <div className="text-right text-[11px] text-muted-foreground">
-          <p>
-            {canvasPins.length} chart{canvasPins.length === 1 ? "" : "s"} · slots · resize · zoom
-          </p>
-          <p>
-            Live max {live?.live?.max_ts ?? "—"}
-            {live?.liveAgeSec != null ? ` · ${Math.round(live.liveAgeSec)}s` : ""}
-          </p>
-        </div>
+      <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-border px-4 py-2.5">
+        <span aria-hidden="true" />
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-foreground">
+          Canvas
+        </p>
+        <p className="justify-self-end text-right text-[11px] text-muted-foreground">
+          {formatPacificTimestamp(live?.live?.max_ts)} PT
+          {live?.liveAgeSec != null ? ` · ${Math.round(live.liveAgeSec)}s ago` : ""}
+        </p>
       </div>
 
       <div className="relative flex min-h-0 flex-1 flex-col">

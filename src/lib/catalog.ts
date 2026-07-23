@@ -2,6 +2,8 @@ import { defineCatalog } from "@json-render/core";
 import { schema } from "@json-render/react/schema";
 import { shadcnComponentDefinitions } from "@json-render/shadcn/catalog";
 import { z } from "zod";
+import { LOVABLE_CARD_META } from "@/components/lovable-viz/card-meta";
+import { visualPriorityPromptRules } from "@/lib/visual-priority";
 
 /** Rows of data points: one record per x-axis entry. */
 const chartData = z
@@ -158,62 +160,17 @@ const lovableCardProps = z.object({
   hint: z.string().nullable().describe("Override subtitle; null uses PlantOS default"),
 });
 
-/** Lovable VisualDeck cards (PlantOS wording). 12 decks × 4 = 48. Question wiring TBD. */
+/** Lovable + Replit PlantOS cards from card-meta (priority: Lovable, then Replit). */
 export const lovableCardComponentDefinitions = Object.fromEntries(
-  (
-    [
-      ["EnergyValueTrend", "Live $ energy value with mini trend. Finance deck 1."],
-      ["PowerSourceMix", "Donut steam vs hydro share. Finance deck 1."],
-      ["TargetAttainment", "Ring gauge shift target %. Finance deck 1."],
-      ["ProductionVolume", "Bar pulse production volume. Finance deck 1."],
-      ["ProcessFunnel", "Funnel demand→steam→MW. Ops deck 2."],
-      ["AreaActivityGrid", "Dot grid area activity. Ops deck 2."],
-      ["StreamCompare", "Waveform stream compare. Ops deck 2."],
-      ["TagUpdateRate", "Tag/sample velocity number. Ops deck 2."],
-      ["PlantHealthRadar", "Radar cost/margin/uptime/target. Finance deck 3."],
-      ["OutputHeatmap", "Output intensity heatmap. Finance deck 3."],
-      ["CostMixBubbles", "Cost mix bubbles. Finance deck 3."],
-      ["ShiftBands", "Shift band progress rings. Finance deck 3."],
-      ["AgentOrbit", "Agent orbit rings. Engineer deck 4."],
-      ["InferenceStreams", "Inference stream lines. Engineer deck 4."],
-      ["AnomalyMap", "Anomaly constellation map. Engineer deck 4."],
-      ["ConfidenceScore", "Finding confidence gauge. Engineer deck 4."],
-      ["UnitHealthGrid", "Unit health grid. Ops deck 5."],
-      ["ThroughputTimeline", "Throughput vs target timeline. Ops deck 5/9."],
-      ["QualityBreakdown", "Quality nested rings. Ops deck 5."],
-      ["ActiveAlerts", "Active alert feed. Ops deck 5."],
-      ["OeeRing", "OEE ring. Ops deck 6."],
-      ["EnergyProduced", "Energy produced MWh. Ops deck 6."],
-      ["OffNormalRate", "Off-normal rate %. Ops deck 6."],
-      ["SampleInterval", "Sample interval. Ops deck 6."],
-      ["GeneratorOutput", "Generator MW (P4_ST_PO). Engineer deck 7."],
-      ["TurbineSpeed", "Turbine rotor rpm (P2_SIT01). Engineer deck 7."],
-      ["BoilerPressure", "Boiler pressure (P1_PIT01). Engineer deck 7."],
-      ["ClosestToLimit", "Condition bars near limits. Engineer deck 7."],
-      ["OutputVsDemand", "Output vs demand lines. Engineer deck 8."],
-      ["UtilityFlow", "Steam/water/fuel pipe flow. Engineer deck 8."],
-      ["ThermalMap", "Thermal heatmap. Engineer deck 8/10."],
-      ["VibrationSpectrum", "Vibration FFT bars. Engineer deck 8/10."],
-      ["ShiftComparison", "Planned vs actual shift bars. Ops deck 9."],
-      ["AreaUtilization", "Area utilization rings. Ops deck 9."],
-      ["ShiftAlerts", "Shift alert feed. Ops deck 9."],
-      ["ShiftThroughput", "Shift throughput timeline. Ops deck 9."],
-      ["AssetRadar", "Asset subsystem radar. Engineer deck 10."],
-      ["BearingVibration", "Bearing vibration spectrum. Engineer deck 10."],
-      ["ThermalSignature", "Thermal signature map. Engineer deck 10."],
-      ["TurbineRotorCard", "Turbine rotor visual. Engineer deck 10."],
-      ["HydroUnit", "Hydro unit faceplate (P4_HT_PO). Engineer deck 11."],
-      ["HydroEnergyBars", "Hydro energy bars. Engineer deck 11."],
-      ["ComponentTemps", "Component temp chips. Engineer deck 11."],
-      ["PowerAndTarget", "Half gauge + target progress. Engineer deck 11."],
-      ["ValueByArea", "Value by plant area donut. Finance deck 12."],
-      ["PlantValueMap", "Plant value heat map. Finance deck 12."],
-      ["FinanceFunnelDetail", "Finance KPIs + funnel stream. Finance deck 12."],
-      ["ForecastTrajectory", "Actual vs plan S-curve. Finance deck 12."],
-    ] as const
-  ).map(([name, description]) => [
-    name,
-    { props: lovableCardProps, description: `Lovable PlantOS card: ${description}` },
+  LOVABLE_CARD_META.map((meta) => [
+    meta.type,
+    {
+      props: lovableCardProps,
+      description:
+        meta.family === "replit"
+          ? `Replit-derived PlantOS card (tier 2): ${meta.description}`
+          : `Lovable PlantOS card (tier 1 — preferred): ${meta.description}`,
+    },
   ])
 );
 
@@ -242,31 +199,66 @@ export type VisualizationSpec = {
   >;
 };
 
+function formatComponentBlock(name: string, def: { description?: string; props: z.ZodType }) {
+  const jsonSchema = z.toJSONSchema(def.props, { io: "input" });
+  delete jsonSchema.$schema;
+  return `### ${name}\n${def.description ?? ""}\nProps schema: ${JSON.stringify(jsonSchema)}`;
+}
+
 export function catalogPromptSection(): string {
-  const components = Object.entries(catalog.data.components)
-    .map(([name, def]) => {
-      const jsonSchema = z.toJSONSchema(def.props as z.ZodType, { io: "input" });
-      delete jsonSchema.$schema;
-      return `### ${name}\n${(def as { description?: string }).description ?? ""}\nProps schema: ${JSON.stringify(jsonSchema)}`;
-    })
+  const lovable = LOVABLE_CARD_META.filter((c) => c.family === "lovable");
+  const replit = LOVABLE_CARD_META.filter((c) => c.family === "replit");
+  const comps = catalog.data.components as Record<
+    string,
+    { description?: string; props: z.ZodType }
+  >;
+
+  const tier1 = lovable
+    .map((c) => formatComponentBlock(c.type, comps[c.type] ?? { props: lovableCardProps, description: c.description }))
+    .join("\n\n");
+  const tier2 = replit
+    .map((c) => formatComponentBlock(c.type, comps[c.type] ?? { props: lovableCardProps, description: c.description }))
+    .join("\n\n");
+  const tier3 = Object.keys(plantVizComponentDefinitions)
+    .map((name) => formatComponentBlock(name, comps[name]))
+    .join("\n\n");
+  const tier4Core = ["LineChart", "BarChart", "AreaChart", "PieChart", "Stat", "Card", "Grid", "Stack", "Heading", "Text"];
+  const tier4 = tier4Core
+    .filter((name) => comps[name])
+    .map((name) => formatComponentBlock(name, comps[name]))
     .join("\n\n");
 
-  return `The spec is a flat element map:
+  return `${visualPriorityPromptRules()}
+
+The spec is a flat element map:
 { "root": "<key of root element>", "elements": { "<key>": { "type": "<ComponentName>", "props": { ... }, "children": ["<child key>", ...] } } }
 
 - Every key referenced in "children" or "root" must exist in "elements".
 - Layout/containers that take children include Card, Stack, Grid, Tabs, Collapsible, Dialog, Drawer (and similar). Leaf components omit children or pass [].
-- Prefer display components for plant answers: Card, Grid, Stat, Gauge, SimpleGauge, CylindricalTank, Thermometer, LedDisplay, Sparkline, Motor/Pump/Valve/Vessel/Sensor, charts (LineChart/TimeSeriesChart/PowerChart/PieChart), Table, Alert, Badge, Progress, Heading, Text.
-- Lovable PlantOS cards (EnergyValueTrend, GeneratorOutput, TurbineSpeed, …): use when composing role towers; question→card maps will be provided — prefer those named cards over inventing layouts.
-- For Engineer: GeneratorOutput/TurbineSpeed/BoilerPressure/Process signals cards + gauges. For Operations: UnitHealthGrid/ThroughputTimeline/OeeRing. For Finance: EnergyValueTrend/PowerSourceMix/TargetAttainment/ValueByArea.
-- Avoid form controls (Input, Checkbox, …) unless the user is configuring something — PlantOS is read-only.
+- Chat density: by default emit **one** chart or a few small stats — never a wall of charts. Multi-chart Grids only when the user asks for many views.
+- Role hints: Engineer → GeneratorOutput / TurbineSpeed / BoilerPressure / Hydro* Lovable cards. Operations → UnitHealthGrid / ThroughputTimeline / OeeRing. Finance → EnergyValueTrend / PowerSourceMix / TargetAttainment / ValueByArea.
+- Avoid form controls unless the user is configuring something — PlantOS is read-only.
 - Props marked nullable may be omitted or null.
-- Inline the data rows in chart/table props — components don't fetch anything.
+- Named Lovable/Replit cards take seed/live bindings in the UI — you usually only pass optional label/hint overrides (no inline series required).
+- Generic charts (tier 4) need data rows inlined in props.
 
-Available components:
+## Tier 1 — Lovable (USE THESE FIRST)
 
-${components}`;
+${tier1}
+
+## Tier 2 — Replit (only if no Lovable card fits)
+
+${tier2}
+
+## Tier 3 — Ignition plant-viz (only if no Lovable/Replit card fits)
+
+${tier3}
+
+## Tier 4 — Generic / other (last resort)
+
+${tier4}`;
 }
+
 
 export function normalizeSpec(input: unknown): VisualizationSpec | null {
   const looksLikeSpec = (v: unknown): v is VisualizationSpec =>

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { SparkTrend } from "@/components/charts";
+import { formatPacificTimestamp } from "@/lib/format-time";
 
 type OverviewSnapshot = {
   productionMW?: number | null;
@@ -74,8 +75,8 @@ export function OverviewPanel({
           {liveMoving ? " · refreshing while Start is playing" : ""}
         </span>
         <span>
-          Live max {live?.live?.max_ts ?? "—"} · {String(live?.live?.c ?? 0)} rows
-          {live?.liveAgeSec != null ? ` · ${Math.round(live.liveAgeSec)}s` : ""}
+          {formatPacificTimestamp(live?.live?.max_ts)} PT · {String(live?.live?.c ?? 0)} rows
+          {live?.liveAgeSec != null ? ` · ${Math.round(live.liveAgeSec)}s ago` : ""}
         </span>
       </div>
 
