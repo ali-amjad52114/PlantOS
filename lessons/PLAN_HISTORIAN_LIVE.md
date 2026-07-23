@@ -23,7 +23,7 @@ Query asked for last N minutes from `max(ts)`, but the chart **auto-fit X to ava
 
 ## DO
 1. Play/pause control next to range pills (`data-testid="historian-live"`).
-2. While live: poll `/api/plant/card-series` (~2s) for that card type + range.
+2. While live: poll `/api/plant/card-series` every **1s** for that card type + range.
 3. API returns ISO series timestamps + `windowStart` / `windowEnd` (ms or ISO) for the selected minutes.
 4. Chart X: `type="number"` + `domain={[start, end]}` + `formatAxisTime` ticks when `seriesWindow` is set.
 5. `trend()` subquery `max(ts)` must use the same `source IN ('live','history')` filter as the outer query.

@@ -16,7 +16,8 @@ import {
   YAxis,
 } from "recharts";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { formatAxisTime } from "@/lib/axis-time";
+import { formatAxisTime, parseClickHouseTimeMs } from "@/lib/format-time";
+import { interactiveChartKind } from "@/lib/historian-range";
 import { useCardLive, useChartHeight } from "./card-live-context";
 
 /** Extra bottom room for angled "Jul 22 20:00" ticks (Trigger-style). */
@@ -162,20 +163,13 @@ function ChartShell({
 }
 
 function parseSeriesMs(t: string | number): number | null {
-  if (typeof t === "number" && Number.isFinite(t)) return t;
-  const raw = String(t).trim();
-  if (/^\d+$/.test(raw)) {
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : null;
-  }
-  const normalized = /^\d{4}-\d{2}-\d{2} /.test(raw) ? raw.replace(" ", "T") : raw;
-  const parsed = new Date(normalized);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+  return parseClickHouseTimeMs(t);
 }
 
 function useChartData(seed: Array<{ t: string | number; v: number }> = DEFAULT_SEED) {
   const bound = useCardLive();
   const window = bound?.seriesWindow;
+  const withSeconds = Boolean(window && window.minutes <= 1);
   if (bound?.series?.length) {
     if (window && Number.isFinite(window.startMs) && Number.isFinite(window.endMs)) {
       const data = bound.series
@@ -192,15 +186,20 @@ function useChartData(seed: Array<{ t: string | number; v: number }> = DEFAULT_S
         primary: bound.primary,
         live: true as const,
         timeDomain: [window.startMs, window.endMs] as [number, number],
+        withSeconds,
       };
     }
     return {
-      data: bound.series.map((p) => ({ t: formatAxisTime(p.t), v: Number(p.v) })),
+      data: bound.series.map((p) => ({
+        t: formatAxisTime(p.t, { withSeconds }),
+        v: Number(p.v),
+      })),
       unit: bound.unit,
       items: bound.items,
       primary: bound.primary,
       live: true as const,
       timeDomain: null as [number, number] | null,
+      withSeconds,
     };
   }
   return {
@@ -210,25 +209,33 @@ function useChartData(seed: Array<{ t: string | number; v: number }> = DEFAULT_S
     primary: bound?.primary,
     live: false as const,
     timeDomain: null as [number, number] | null,
+    withSeconds: false,
   };
 }
 
-function timeXAxisProps(domain: [number, number]) {
+function timeXAxisProps(domain: [number, number], withSeconds: boolean) {
   return {
     ...xAxisProps,
     type: "number" as const,
     domain,
     allowDataOverflow: true,
-    tickFormatter: (v: number) => formatAxisTime(v),
+    tickFormatter: (v: number) => formatAxisTime(v, { withSeconds }),
   };
 }
 
-function tipContentForChart(unit: string | undefined, valueDecimals: number, timeScale: boolean) {
+function tipContentForChart(
+  unit: string | undefined,
+  valueDecimals: number,
+  timeScale: boolean,
+  withSeconds: boolean
+) {
   const base = tipContent(unit, valueDecimals);
   if (!timeScale) return base;
   return function TipBody(props: TipProps) {
     const label =
-      typeof props.label === "number" ? formatAxisTime(props.label) : props.label;
+      typeof props.label === "number"
+        ? formatAxisTime(props.label, { withSeconds })
+        : props.label;
     return base({ ...props, label });
   };
 }
@@ -241,9 +248,9 @@ export function InteractiveSeriesChart({
   unit?: string;
   seed?: Array<{ t: string | number; v: number }>;
 }) {
-  const { data, unit, timeDomain } = useChartData(seed);
+  const { data, unit, timeDomain, withSeconds } = useChartData(seed);
   const u = unitProp || unit || "MW";
-  const xProps = timeDomain ? timeXAxisProps(timeDomain) : xAxisProps;
+  const xProps = timeDomain ? timeXAxisProps(timeDomain, withSeconds) : xAxisProps;
   return (
     <ChartShell mark="series" testId="interactive-series">
       {({ width, height }) => (
@@ -263,7 +270,7 @@ export function InteractiveSeriesChart({
             isAnimationActive={false}
             wrapperStyle={{ zIndex: 60, outline: "none", pointerEvents: "none" }}
             cursor={{ stroke: STROKE, strokeOpacity: 0.4, strokeDasharray: "4 4" }}
-            content={tipContentForChart(u, 2, Boolean(timeDomain))}
+            content={tipContentForChart(u, 2, Boolean(timeDomain), withSeconds)}
           />
           <Area
             type="monotone"
@@ -289,26 +296,77 @@ export function InteractiveBarChart({
   unit?: string;
   seed?: Array<{ t: string | number; v: number }>;
 }) {
-  const { data, unit, timeDomain } = useChartData(seed);
+  const { data, unit, timeDomain, withSeconds } = useChartData(seed);
   const u = unitProp || unit || "MW";
-  const xProps = timeDomain ? timeXAxisProps(timeDomain) : xAxisProps;
+  const xProps = timeDomain ? timeXAxisProps(timeDomain, withSeconds) : xAxisProps;
+  // Time-scale + dense live series (e.g. 1m with 100+ points): default Bar width
+  // collapses to ~0px so the plot looks empty while axes still render. Cap bar size.
+  const denseTime = Boolean(timeDomain && data.length > 24);
+
   return (
     <ChartShell mark="bars" testId="interactive-bars">
-      {({ width, height }) => (
-        <BarChart width={width} height={height} data={data} margin={chartMargin}>
-          <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} strokeOpacity={0.7} />
-          <XAxis {...xProps} />
-          <YAxis {...yAxisProps} />
-          <Tooltip
-            allowEscapeViewBox={{ x: true, y: true }}
-            isAnimationActive={false}
-            wrapperStyle={{ zIndex: 60, outline: "none", pointerEvents: "none" }}
-            cursor={{ stroke: STROKE, strokeOpacity: 0.4, strokeDasharray: "4 4" }}
-            content={tipContentForChart(u, 2, Boolean(timeDomain))}
-          />
-          <Bar dataKey="v" name="Value" fill={STROKE} radius={[5, 5, 0, 0]} isAnimationActive={false} />
-        </BarChart>
-      )}
+      {({ width, height }) => {
+        const plotW = Math.max(120, width - 56);
+        const barSize = denseTime
+          ? Math.max(2, Math.min(14, Math.floor((plotW / Math.max(data.length, 1)) * 0.85)))
+          : undefined;
+        // Extremely dense: Area is readable; bars would still be hairlines.
+        if (denseTime && data.length > 60) {
+          return (
+            <AreaChart width={width} height={height} data={data} margin={chartMargin}>
+              <defs>
+                <linearGradient id="plantos-dense-bar-area" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor={FILL_A} stopOpacity={0.55} />
+                  <stop offset="100%" stopColor={FILL_A} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} strokeOpacity={0.7} />
+              <XAxis {...xProps} />
+              <YAxis {...yAxisProps} />
+              <Tooltip
+                allowEscapeViewBox={{ x: true, y: true }}
+                isAnimationActive={false}
+                wrapperStyle={{ zIndex: 60, outline: "none", pointerEvents: "none" }}
+                cursor={{ stroke: STROKE, strokeOpacity: 0.4, strokeDasharray: "4 4" }}
+                content={tipContentForChart(u, 2, Boolean(timeDomain), withSeconds)}
+              />
+              <Area
+                type="monotone"
+                dataKey="v"
+                name="Value"
+                stroke={STROKE}
+                strokeWidth={2.2}
+                fill="url(#plantos-dense-bar-area)"
+                activeDot={{ r: 4, strokeWidth: 0, fill: STROKE }}
+                isAnimationActive={false}
+              />
+            </AreaChart>
+          );
+        }
+        return (
+          <BarChart width={width} height={height} data={data} margin={chartMargin}>
+            <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} strokeOpacity={0.7} />
+            <XAxis {...xProps} />
+            <YAxis {...yAxisProps} />
+            <Tooltip
+              allowEscapeViewBox={{ x: true, y: true }}
+              isAnimationActive={false}
+              wrapperStyle={{ zIndex: 60, outline: "none", pointerEvents: "none" }}
+              cursor={{ stroke: STROKE, strokeOpacity: 0.4, strokeDasharray: "4 4" }}
+              content={tipContentForChart(u, 2, Boolean(timeDomain), withSeconds)}
+            />
+            <Bar
+              dataKey="v"
+              name="Value"
+              fill={STROKE}
+              radius={[5, 5, 0, 0]}
+              isAnimationActive={false}
+              barSize={barSize}
+              maxBarSize={18}
+            />
+          </BarChart>
+        );
+      }}
     </ChartShell>
   );
 }
@@ -321,9 +379,9 @@ export function InteractiveLineChart({
   unit?: string;
   seed?: Array<{ t: string | number; v: number }>;
 }) {
-  const { data, unit, timeDomain } = useChartData(seed);
+  const { data, unit, timeDomain, withSeconds } = useChartData(seed);
   const u = unitProp || unit || "MW";
-  const xProps = timeDomain ? timeXAxisProps(timeDomain) : xAxisProps;
+  const xProps = timeDomain ? timeXAxisProps(timeDomain, withSeconds) : xAxisProps;
   const dual = data.map((d, i) => ({
     ...d,
     secondary: d.v * (0.92 + (i % 5) * 0.01),
@@ -340,7 +398,7 @@ export function InteractiveLineChart({
             isAnimationActive={false}
             wrapperStyle={{ zIndex: 60, outline: "none", pointerEvents: "none" }}
             cursor={{ stroke: STROKE, strokeOpacity: 0.4, strokeDasharray: "4 4" }}
-            content={tipContentForChart(u, 2, Boolean(timeDomain))}
+            content={tipContentForChart(u, 2, Boolean(timeDomain), withSeconds)}
           />
           <Line
             type="monotone"
@@ -509,24 +567,14 @@ export function InteractiveItemsList() {
 /**
  * Pick interactive body for a Lovable/Replit card type.
  * Every branch returns axes+tooltip or exact-value rows — never decorative-only.
+ * Kind routing lives in historian-range.interactiveChartKind (shared with play/range pills).
  */
 export function InteractiveCardBody({ type }: { type: string }) {
-  if (
-    /Alert|Feed|Closest|Condition|Attention|RangeBars|Device|Util|Reliability|Scorecard|State|UnitHealth/i.test(
-      type
-    )
-  ) {
-    return <InteractiveItemsList />;
-  }
-  if (/Mix|Donut|Pie|Source|CostMix|ValueByArea|YieldDonut|OpsShiftDonut|QualityBreakdown/i.test(type)) {
-    return <InteractivePieChart />;
-  }
-  if (/Bar|Volume|Spectrum|Comparison|ShiftBars|EnergyBars|Hourly|Pareto|Usage|Vibration/i.test(type)) {
-    return <InteractiveBarChart />;
-  }
-  if (/Vs|Compare|Signal|Demand|Trend|Timeline|Throughput|Forecast|SCurve|RateChart|VibChart/i.test(type)) {
-    return <InteractiveLineChart />;
-  }
+  const kind = interactiveChartKind(type);
+  if (kind === "items") return <InteractiveItemsList />;
+  if (kind === "pie") return <InteractivePieChart />;
+  if (kind === "bar") return <InteractiveBarChart />;
+  if (kind === "line") return <InteractiveLineChart />;
   return <InteractiveSeriesChart />;
 }
 

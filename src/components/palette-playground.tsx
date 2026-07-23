@@ -1,7 +1,14 @@
 "use client";
 
 import { Palette, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 
 /** Exact presets from reference/Loveable Cards/src/routes/index.tsx */
@@ -106,6 +113,167 @@ export const LOVABLE_PALETTE_PRESETS: {
 ];
 
 const PRESET_KEY = "plantos.lovable.palette.preset";
+const THEME_BUTTON_POSITION_KEY = "plantos.lovable.palette.trigger-position";
+const THEME_BUTTON_VIEWPORT_GUTTER = 8;
+
+type ThemeButtonPosition = {
+  x: number;
+  y: number;
+};
+
+function clampThemeButtonPosition(
+  position: ThemeButtonPosition,
+  button: HTMLButtonElement
+): ThemeButtonPosition {
+  return {
+    x: Math.min(
+      Math.max(THEME_BUTTON_VIEWPORT_GUTTER, position.x),
+      Math.max(THEME_BUTTON_VIEWPORT_GUTTER, window.innerWidth - button.offsetWidth - THEME_BUTTON_VIEWPORT_GUTTER)
+    ),
+    y: Math.min(
+      Math.max(THEME_BUTTON_VIEWPORT_GUTTER, position.y),
+      Math.max(THEME_BUTTON_VIEWPORT_GUTTER, window.innerHeight - button.offsetHeight - THEME_BUTTON_VIEWPORT_GUTTER)
+    ),
+  };
+}
+
+function FloatingThemeButton({ onOpen }: { onOpen: () => void }) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  } | null>(null);
+  const lastDragEndedAtRef = useRef(0);
+  const [position, setPosition] = useState<ThemeButtonPosition | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const savePosition = useCallback((next: ThemeButtonPosition) => {
+    try {
+      localStorage.setItem(THEME_BUTTON_POSITION_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    const button = buttonRef.current;
+    if (!button) return;
+    try {
+      const raw = localStorage.getItem(THEME_BUTTON_POSITION_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as Partial<ThemeButtonPosition>;
+      if (Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+        setPosition(
+          clampThemeButtonPosition(
+            { x: Number(saved.x), y: Number(saved.y) },
+            button
+          )
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    const keepInViewport = () => {
+      const button = buttonRef.current;
+      if (!button) return;
+      setPosition((current) => {
+        if (!current) return current;
+        const next = clampThemeButtonPosition(current, button);
+        savePosition(next);
+        return next;
+      });
+    };
+    window.addEventListener("resize", keepInViewport);
+    return () => window.removeEventListener("resize", keepInViewport);
+  }, [savePosition]);
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: rect.left,
+      originY: rect.top,
+      moved: false,
+    };
+    setPosition({ x: rect.left, y: rect.top });
+    setDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    const button = buttonRef.current;
+    if (!drag || !button || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) >= 4) drag.moved = true;
+    setPosition(
+      clampThemeButtonPosition(
+        { x: drag.originX + dx, y: drag.originY + dy },
+        button
+      )
+    );
+  };
+
+  const finishDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (drag.moved) lastDragEndedAtRef.current = Date.now();
+    dragRef.current = null;
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setPosition((current) => {
+      if (current) savePosition(current);
+      return current;
+    });
+  };
+
+  const style: CSSProperties | undefined = position
+    ? {
+        left: position.x,
+        top: position.y,
+        right: "auto",
+        bottom: "auto",
+        touchAction: "none",
+      }
+    : { touchAction: "none" };
+
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      aria-label="Open theme settings; drag to reposition"
+      title="Drag to move · Click to open Theme"
+      onClick={() => {
+        if (Date.now() - lastDragEndedAtRef.current < 350) return;
+        onOpen();
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={finishDrag}
+      onPointerCancel={finishDrag}
+      style={style}
+      className={`fixed bottom-6 right-6 z-[190] flex select-none items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/30 transition hover:scale-105 ${
+        dragging ? "cursor-grabbing scale-105" : "cursor-grab"
+      }`}
+    >
+      <Palette className="h-4 w-4" />
+      Theme
+    </button>
+  );
+}
 
 export function applyPalette(vars: PaletteVars) {
   const r = document.documentElement.style;
@@ -335,14 +503,7 @@ export function LovablePaletteControls({
           <Palette className="h-4 w-4" /> Palette
         </button>
       )}
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-[190] flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/30 transition hover:scale-105"
-      >
-        <Palette className="h-4 w-4" />
-        Theme
-      </button>
+      <FloatingThemeButton onOpen={() => setOpen(true)} />
       {layer}
     </>
   );

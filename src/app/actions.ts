@@ -5,7 +5,8 @@ import { chat } from "@trigger.dev/sdk/ai";
 import type { plantInvestigate } from "@/trigger/plant-investigate";
 import type { plantParallelInvestigate } from "@/trigger/plant-parallel-investigate";
 import type { plantRouteInvestigate } from "@/trigger/plant-route-investigate";
-import type { plantReplayBurst } from "@/trigger/plant-replay";
+import type { plantReplaySession } from "@/trigger/plant-replay";
+import type { plantShiftDigestDemo } from "@/trigger/plant-shift-digest";
 
 export const startChatSession = chat.createStartSessionAction("plantos-agent");
 
@@ -58,10 +59,19 @@ export async function triggerPlantParallelInvestigate(payload?: { question?: str
   return mintRunToken(handle.id);
 }
 
-/** Phase 3: denser on-demand replay burst + Realtime subscribe credentials. */
+/** ~1s LIVE session while Start is playing + Realtime subscribe credentials. */
 export async function triggerPlantReplayBurst(payload?: { reason?: string }) {
-  const handle = await tasks.trigger<typeof plantReplayBurst>("plant-replay-burst", {
+  const handle = await tasks.trigger<typeof plantReplaySession>("plant-replay-session", {
     reason: payload?.reason ?? "ui-start",
   });
+  return mintRunToken(handle.id);
+}
+
+/** One-click Slack shift digest for live demos (bypasses PLANT_DIGEST_ENABLED). */
+export async function triggerPlantShiftDigestDemo() {
+  const handle = await tasks.trigger<typeof plantShiftDigestDemo>(
+    "plant-shift-digest-demo",
+    undefined
+  );
   return mintRunToken(handle.id);
 }

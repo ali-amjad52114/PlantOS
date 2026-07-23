@@ -89,7 +89,7 @@ try {
 
   // Route & investigate with engineer question already in textarea
   const ta = page.locator("textarea");
-  await ta.fill("What is the current status of the generators and turbine?");
+  await ta.fill("Show the hydro unit, steam versus hydro MW, component temperatures, and power versus shift target from live ClickHouse.");
   await page.getByRole("button", { name: /Route & investigate/i }).click();
   note("clicked_route", true, "clicked Route & investigate");
 
@@ -113,20 +113,20 @@ try {
 
   // Ask agent path (optional — may fail without dashboard OPEN_AI)
   const askBtn = page.getByRole("button", { name: /Ask agent|Send|Submit/i }).first();
-  const suggested = page.getByRole("button", { name: /generators and turbine|Ask/i }).first();
+  const suggested = page.getByRole("button", { name: /hydro unit|steam versus hydro|Ask/i }).first();
   let agentTried = false;
   let agentOk = false;
   let agentDetail = "";
   try {
     // Prefer clicking a suggested chip if present
-    const chip = page.locator("button", { hasText: /generators and turbine/i });
+    const chip = page.locator("button", { hasText: /hydro unit|steam versus hydro/i });
     if (await chip.count()) {
       await chip.first().click();
       agentTried = true;
     } else {
       const input = page.locator("textarea, input[type='text']").last();
       if (await input.count()) {
-        await input.fill("What is the current status of the generators and turbine?");
+        await input.fill("Show the hydro unit, steam versus hydro MW, component temperatures, and power versus shift target from live ClickHouse.");
         const send = page.getByRole("button", { name: /Send|Ask/i }).first();
         if (await send.count()) {
           await send.click();

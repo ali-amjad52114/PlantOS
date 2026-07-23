@@ -52,7 +52,7 @@ try {
   note("realtime_investigate", realtimeOk, realtimeDetail || "no completion");
 
   // 2) Route
-  await page.locator("textarea").fill("What is the current status of the generators and turbine?");
+  await page.locator("textarea").fill("Show the hydro unit, steam versus hydro MW, component temperatures, and power versus shift target from live ClickHouse.");
   await page.getByRole("button", { name: /Route & investigate/i }).click();
   let routeOk = false;
   let routeDetail = "";

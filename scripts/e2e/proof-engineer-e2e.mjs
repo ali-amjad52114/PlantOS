@@ -58,7 +58,7 @@ console.log(
 
 console.log("--- route engineer question ---");
 const route = await tasks.trigger("plant-route-investigate", {
-  question: "What is the current status of the generators and turbine?",
+  question: "Show the hydro unit, steam versus hydro MW, component temperatures, and power versus shift target from live ClickHouse.",
 });
 const routeRun = await waitDone(route.id);
 console.log(

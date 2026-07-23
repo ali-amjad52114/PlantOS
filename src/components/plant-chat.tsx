@@ -910,9 +910,12 @@ function deriveAgentStreamProgress(
     (p) =>
       p.type === "tool-investigateEngineer" ||
       p.type === "tool-investigateOperations" ||
-      p.type === "tool-investigateFinance"
+      p.type === "tool-investigateFinance" ||
+      p.type === "tool-investigateParallel" ||
+      p.type === "tool-consultEngineer"
   );
   const live = parts.find((p) => p.type === "tool-getLivePlantStatus");
+  const selectViz = parts.find((p) => p.type === "tool-selectVisuals");
   const vizParts = parts.filter((p) => p.type === "tool-renderVisualization");
   const viz = vizParts[vizParts.length - 1];
   const textParts = parts.filter((p) => p.type === "text" && String(p.text || "").trim());
@@ -938,6 +941,8 @@ function deriveAgentStreamProgress(
 
   const invDone = inv?.state === "output-available";
   const invActive = Boolean(inv) && !invDone;
+  const selectDone = selectViz?.state === "output-available";
+  const selectActive = Boolean(selectViz) && !selectDone;
   const vizSpec =
     viz && viz.state !== "input-streaming" ? normalizeSpec(viz.input?.spec) : null;
   const vizOk = Boolean(vizSpec) && viz?.output?.ok !== false;
@@ -959,19 +964,35 @@ function deriveAgentStreamProgress(
     label = latestStep.data.label;
   }
   if (invActive || (live && live.state !== "output-available")) {
-    percentage = 35;
+    percentage = inv?.type === "tool-investigateParallel" ? 42 : 35;
     label =
-      inv?.type === "tool-investigateOperations"
-        ? "Running operations investigation…"
-        : inv?.type === "tool-investigateFinance"
-          ? "Running finance investigation…"
-          : live && live.state !== "output-available"
-            ? "Checking live plant status…"
-            : "Running engineer investigation…";
+      inv?.type === "tool-investigateParallel"
+        ? "Parallel fan-out: engineer + ops + finance…"
+        : inv?.type === "tool-consultEngineer"
+          ? "Consulting engineer specialist…"
+          : inv?.type === "tool-investigateOperations"
+            ? "Running operations investigation…"
+            : inv?.type === "tool-investigateFinance"
+              ? "Running finance investigation…"
+              : live && live.state !== "output-available"
+                ? "Checking live plant status…"
+                : "Running engineer investigation…";
+    if (latestStep?.data?.status === "running" && latestStep.data.label) {
+      label = latestStep.data.label;
+    }
   }
-  if (invDone && !hasTower && !viz) {
+  if (invDone && !hasTower && !viz && !selectDone) {
     percentage = 55;
-    label = "Investigation complete — preparing tower…";
+    label =
+      inv?.type === "tool-investigateParallel"
+        ? "Parallel brief ready — selecting visuals…"
+        : inv?.type === "tool-consultEngineer"
+          ? "Specialist done — selecting visuals…"
+          : "Investigation complete — preparing tower…";
+  }
+  if (selectActive) {
+    percentage = 65;
+    label = "Ranking catalog visuals…";
   }
   if (hasTower) {
     percentage = 78;
@@ -1004,7 +1025,12 @@ function deriveAgentStreamProgress(
     },
     {
       id: "investigate",
-      label: "Investigate",
+      label:
+        inv?.type === "tool-investigateParallel"
+          ? "Parallel"
+          : inv?.type === "tool-consultEngineer"
+            ? "Specialist"
+            : "Investigate",
       done: invDone || Boolean(live && live.state === "output-available") || hasTower,
       active:
         invActive ||
@@ -1014,8 +1040,8 @@ function deriveAgentStreamProgress(
     {
       id: "viz",
       label: "Tower",
-      done: hasTower || vizOk,
-      active: (!hasTower && invDone) || vizActive,
+      done: hasTower || vizOk || selectDone,
+      active: (!hasTower && invDone) || vizActive || selectActive,
     },
     {
       id: "answer",

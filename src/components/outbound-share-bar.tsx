@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Mail, MessageSquare, Presentation, FileSpreadsheet, FileText } from "lucide-react";
+import { Loader2, Mail, MessageSquare, Presentation, FileSpreadsheet, FileText, Radio } from "lucide-react";
 import { useRealtimeRun } from "@trigger.dev/react-hooks";
 import {
   cancelOutboundIntent,
@@ -9,6 +9,7 @@ import {
   startOutboundSlackSend,
   undoOutboundSlack,
 } from "@/app/actions-outbound";
+import { triggerPlantShiftDigestDemo } from "@/app/actions";
 import { startOutboundGoogleSend } from "@/app/actions-outbound-google";
 import { captureCanvasChartImages } from "@/lib/outbound/capture-charts";
 import type { OutboundPack } from "@/lib/outbound/pack";
@@ -62,6 +63,58 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
   const [hasMessageTs, setHasMessageTs] = useState(false);
   const [artifactUrl, setArtifactUrl] = useState<string | null>(null);
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [digestBusy, setDigestBusy] = useState(false);
+  const [digestNote, setDigestNote] = useState<string | null>(null);
+  const [digestRunId, setDigestRunId] = useState<string | null>(null);
+  const [digestToken, setDigestToken] = useState<string | null>(null);
+
+  const { run: digestRun } = useRealtimeRun(digestRunId ?? undefined, {
+    accessToken: digestToken ?? "",
+    enabled: Boolean(digestRunId && digestToken),
+    skipColumns: ["payload"],
+  });
+
+  useEffect(() => {
+    if (!digestRun) return;
+    const meta = digestRun.metadata as { status?: string; error?: string } | undefined;
+    if (digestRun.status === "COMPLETED") {
+      const out = digestRun.output as { ok?: boolean; error?: string; skipped?: boolean } | undefined;
+      if (out?.ok && !out.skipped) {
+        setDigestNote("Shift digest sent to Slack");
+      } else if (out?.skipped || meta?.status === "disabled") {
+        setDigestNote("Digest skipped — check outbound config");
+      } else {
+        setDigestNote(out?.error || meta?.error || "Digest finished with an error");
+      }
+      setDigestBusy(false);
+    }
+    if (
+      digestRun.status === "FAILED" ||
+      digestRun.status === "CRASHED" ||
+      digestRun.status === "SYSTEM_FAILURE"
+    ) {
+      setDigestNote("Digest run failed — check Trigger logs");
+      setDigestBusy(false);
+    }
+    if (meta?.status === "building" || meta?.status === "sending") {
+      setDigestNote(meta.status === "building" ? "Building digest…" : "Sending to Slack…");
+    }
+  }, [digestRun]);
+
+  async function onDemoDigest() {
+    setError(null);
+    setDigestNote(null);
+    setDigestBusy(true);
+    try {
+      const { runId: dRunId, publicAccessToken } = await triggerPlantShiftDigestDemo();
+      setDigestRunId(dRunId);
+      setDigestToken(publicAccessToken);
+      setDigestNote("Digest run started…");
+    } catch (e) {
+      setDigestBusy(false);
+      setDigestNote(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   function clearEphemeralTimer() {
     if (clearTimerRef.current) {
@@ -426,6 +479,31 @@ export function OutboundShareBar({ draft }: { draft: ShareDraft | null }) {
           testId="outbound-send-slides"
           onClick={() => void onGoogleClick("slides")}
         />
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={digestBusy || inFlight || !status.enabled}
+          onClick={() => void onDemoDigest()}
+          data-testid="outbound-demo-digest"
+          className="inline-flex items-center gap-1.5 rounded-lg border-2 border-sky-300/70 bg-background px-2.5 py-1.5 text-xs font-semibold hover:bg-muted disabled:opacity-50"
+          title="Send a live plant shift digest to Slack (demo)"
+        >
+          {digestBusy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Radio className="h-3.5 w-3.5" />
+          )}
+          {digestBusy ? "Sending digest…" : "Demo shift digest → Slack"}
+        </button>
+        {digestNote ? (
+          <span className="text-[11px] text-muted-foreground">{digestNote}</span>
+        ) : (
+          <span className="text-[11px] text-muted-foreground">
+            One-click plant summary for the live demo
+          </span>
+        )}
       </div>
 
       {(artifactUrl || canUndo || isTerminalFailure(phase)) && (

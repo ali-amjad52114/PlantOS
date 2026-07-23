@@ -182,10 +182,11 @@ export function bindCardType(type: string, snaps: SnapshotBundle): CardBinding {
     case "ShiftComparison":
     case "TargetAttainment":
       return {
-        kind: "metric",
+        kind: "series",
         primary: Number(ops.percentOfTarget ?? 0),
         unit: "%",
         caption: `Shift ${Number(ops.shiftProductionMWh ?? 0).toFixed(0)} / ${Number(ops.shiftTargetMWh ?? 0).toFixed(0)} MWh · synthetic clock`,
+        series: p4.length ? p4 : [{ t: "now", v: mw }],
         items: [
           {
             label: "Actual MWh",

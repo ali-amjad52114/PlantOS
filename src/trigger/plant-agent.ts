@@ -1,5 +1,6 @@
 import { logger, metadata, prompts } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
+import { AgentChat } from "@trigger.dev/sdk/chat";
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
 import { stepCountIs, streamText, tool } from "ai";
 import type { InferUITools, UIMessage } from "ai";
@@ -18,6 +19,9 @@ import {
   plantRegistry,
   resolvePlantLlmProvider,
 } from "./llm";
+import { plantParallelInvestigate } from "./plant-parallel-investigate";
+// Ensure specialist agent is registered with the worker.
+import "./plant-engineer-agent";
 
 let clickhouse: ClickHouseClient | undefined;
 
@@ -141,6 +145,136 @@ const investigateFinance = tool({
   },
 });
 
+function compactParallelRole(role: string, entry: { ok: boolean; visual?: unknown; error?: string } | undefined) {
+  if (!entry?.ok || !entry.visual || typeof entry.visual !== "object") {
+    return { role, ok: false as const, error: entry?.error ?? "missing" };
+  }
+  const v = entry.visual as Record<string, unknown>;
+  const pick = (keys: string[]) => {
+    const out: Record<string, unknown> = {};
+    for (const k of keys) {
+      if (v[k] !== undefined) out[k] = v[k];
+    }
+    return out;
+  };
+  if (role === "engineer") {
+    return {
+      role,
+      ok: true as const,
+      ...pick(["productionMW", "turbineSpeed", "boilerPressure", "steamFlow", "dataSource"]),
+      attentionTop: Array.isArray(v.attention) ? (v.attention as unknown[]).slice(0, 3) : [],
+    };
+  }
+  if (role === "operations") {
+    return {
+      role,
+      ok: true as const,
+      ...pick([
+        "currentRateMW",
+        "percentOfTarget",
+        "bottleneckArea",
+        "shiftProductionMWh",
+        "dataSource",
+      ]),
+    };
+  }
+  return {
+    role,
+    ok: true as const,
+    ...pick(["productionValueUSD", "operatingCostUSD", "marginUSD", "costPerMWh", "dataSource"]),
+    synthetic: true,
+  };
+}
+
+const investigateParallel = tool({
+  description:
+    "Fan-out Engineer + Operations + Finance ClickHouse investigates in parallel (deep brief / all roles). Use ONLY when the user asks for a plant-wide or multi-role deep brief — not for normal single-role questions. After this, call selectVisuals once.",
+  inputSchema: z.object({
+    question: z.string().describe("User question for the parallel brief"),
+  }),
+  execute: async ({ question }) => {
+    writeStep({
+      id: "parallel-investigate",
+      label: "Fan-out: engineer + operations + finance",
+      status: "running",
+    });
+    writeStep({
+      id: "parallel-investigate-wait",
+      label: "Waiting on parallel ClickHouse investigates…",
+      status: "running",
+    });
+    const result = await plantParallelInvestigate.triggerAndWait({ question });
+    writeStep({
+      id: "parallel-investigate-wait",
+      label: "Parallel investigates returned",
+      status: "complete",
+    });
+    if (!result.ok) {
+      writeStep({
+        id: "parallel-investigate",
+        label: "Parallel investigate failed",
+        status: "error",
+      });
+      const err =
+        typeof result.error === "object" && result.error && "message" in result.error
+          ? String((result.error as { message?: string }).message)
+          : "parallel_failed";
+      return { ok: false as const, error: err };
+    }
+    const out = result.output;
+    const roles = {
+      engineer: compactParallelRole("engineer", out.roles?.engineer),
+      operations: compactParallelRole("operations", out.roles?.operations),
+      finance: compactParallelRole("finance", out.roles?.finance),
+    };
+    writeStep({
+      id: "parallel-investigate",
+      label: `Parallel complete · ${out.okCount}/3 roles`,
+      status: "complete",
+    });
+    return {
+      ok: true as const,
+      okCount: out.okCount,
+      roles,
+      note: "Synthesize one answer across roles, then call selectVisuals once. Do not restate every number.",
+    };
+  },
+});
+
+const consultEngineer = tool({
+  description:
+    "Delegate a deep engineering specialty question to the nested plantos-engineer agent (vibration, reliability, boiler/turbine deep-dive). Use ONLY for specialty engineering depth — not for normal asks, and not instead of investigateParallel for multi-role briefs. Afterward call selectVisuals if charts are needed.",
+  inputSchema: z.object({
+    question: z.string().describe("Engineering specialty question to hand to the specialist"),
+  }),
+  execute: async function* ({ question }, { abortSignal }) {
+    writeStep({
+      id: "consult-engineer",
+      label: "Consulting engineer specialist…",
+      status: "running",
+      role: "engineer",
+    });
+    const sub = new AgentChat({ agent: "plantos-engineer" });
+    try {
+      const stream = await sub.sendMessage(question, { abortSignal });
+      yield* stream.messages();
+    } finally {
+      await sub.close();
+      writeStep({
+        id: "consult-engineer",
+        label: "Engineer specialist complete",
+        status: "complete",
+        role: "engineer",
+      });
+    }
+  },
+  toModelOutput: ({ output: message }) => {
+    const parts = (message as { parts?: Array<{ type?: string; text?: string }> } | undefined)?.parts;
+    const lastText = parts?.findLast((p) => p.type === "text");
+    return { type: "text" as const, value: lastText?.text ?? "Engineer specialist finished." };
+  },
+});
+
 const selectVisuals = tool({
   description:
     "REQUIRED after investigate* for plant questions. Ranks the PlantOS visual catalog for THIS user question and streams a slim Lovable/Replit tower (≤2 cards) plus findingsKeys for the metric strip. Pass the exact user question. Optional preferredTypes are hints only.",
@@ -250,6 +384,8 @@ const allTools = {
   investigateEngineer,
   investigateOperations,
   investigateFinance,
+  investigateParallel,
+  consultEngineer,
   selectVisuals,
   getLivePlantStatus,
   advanceReplay,
@@ -260,6 +396,8 @@ function toolsForClientData(clientData: z.infer<typeof plantClientDataSchema> | 
   const role: PlantRole = clientData?.role ?? "engineer";
   const allowAdvance = clientData?.allowAdvanceReplay === true;
   const shared = {
+    investigateParallel,
+    consultEngineer,
     selectVisuals,
     getLivePlantStatus,
     renderVisualization,
@@ -308,12 +446,14 @@ const systemPrompt = prompts.define({
 
 Role context:
 - The active role arrives as typed **clientData.role** (engineer | operations | finance). Do not expect a [role=…] prefix in the user message.
-- Only the matching investigate* tool is available this turn — call it for plant questions in that role.
+- Only the matching investigate* tool is available this turn for normal single-role questions — call it for plant questions in that role.
+- **investigateParallel**: ONLY when the user asks for a plant-wide / all-roles / deep brief across engineer+ops+finance, or the overview starter that says "parallel investigate". Not the default for single-role asks.
+- **consultEngineer**: ONLY for specialty engineering depth (vibration, reliability, boiler/turbine deep-dive, maintenance specialist). Nested specialist — not for every ask, not a substitute for investigateParallel. Use for the maintenance starter that says "engineer specialist".
 - Live feed questions → call getLivePlantStatus. advanceReplay is only available when explicitly enabled; prefer not to tick the plant yourself.
 
 Presenting results — **chat visual budget + selector (strict)**:
 - **Visual priority:** Lovable → Replit → Ignition → generic. Never invent custom AI cards when a catalog card fits.
-- After investigate*, you **MUST** call **selectVisuals once** with the user's question (and a short summary of metric names). That tool ranks the catalog and streams the tower + findingsKeys — do not skip it.
+- After investigate* / investigateParallel / consultEngineer, you **MUST** call **selectVisuals once** with the user's question (and a short summary of metric names). That tool ranks the catalog and streams the tower + findingsKeys — do not skip it.
 - Do **not** bombard the chat: selectVisuals returns ≤2 cards; the UI shows ≤1 in chat and ≤4 findings readings.
 - Do **not** describe the tower as a markdown table or restate findings numbers.
 - **Do not** call renderVisualization unless the user **explicitly** asks for another chart/view. When you do: one Lovable leaf preferred.

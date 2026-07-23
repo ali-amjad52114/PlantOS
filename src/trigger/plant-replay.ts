@@ -4,8 +4,11 @@ import { getReplayControl, tickReplay } from "../lib/replay";
 
 const REPLAY_QUEUE = { name: "plant-replay", concurrencyLimit: 1 } as const;
 
-/** Sub-ticks per dense run (~1 min wall with ~9s gaps at 1x). */
-const DENSE_TICKS = 6;
+/** Cron safety net: a few ticks if no long session is holding the queue. */
+const CRON_DENSE_TICKS = 6;
+/** Start session: ~1s cadence while playing (cap wall time via maxDuration). */
+const SESSION_GAP_SEC = 1;
+const SESSION_MAX_TICKS = 60 * 45; // ~45 min at 1s
 
 function clickhouse(): ClickHouseClient {
   const url = process.env.CLICKHOUSE_URL;
@@ -20,11 +23,14 @@ type DenseResult = {
   stoppedEarly?: string;
 };
 
-/**
- * Denser LIVE without a second writer: multiple idempotent ticks + durable waits
- * inside one Trigger run. Metadata is Realtime-visible between waits.
- */
-async function runDenseTicks(reason: string): Promise<DenseResult> {
+async function runTickLoop(opts: {
+  reason: string;
+  maxTicks: number;
+  gapSec: number;
+  /** Smaller batches = faster ticks (session aims ~1s wall). */
+  batchOverride?: number;
+}): Promise<DenseResult> {
+  const { reason, maxTicks, gapSec, batchOverride } = opts;
   const ch = clickhouse();
   let insertedRows = 0;
   let lastOriginal: string | null = null;
@@ -47,7 +53,7 @@ async function runDenseTicks(reason: string): Promise<DenseResult> {
     return { ticks: 0, insertedRows: 0, lastOriginal: null, stoppedEarly: "paused" };
   }
 
-  for (let i = 0; i < DENSE_TICKS; i++) {
+  for (let i = 0; i < maxTicks; i++) {
     const mid = await getReplayControl(ch);
     if (!mid.playing) {
       metadata
@@ -55,30 +61,30 @@ async function runDenseTicks(reason: string): Promise<DenseResult> {
         .set("playing", false)
         .set("speed", mid.speed)
         .set("progress", {
-          percentage: Math.round(((i + 1) / DENSE_TICKS) * 100),
-          label: "Paused mid-burst",
+          percentage: Math.min(99, Math.round(((i + 1) / Math.max(maxTicks, 1)) * 100)),
+          label: "Paused",
           step: "paused",
         })
         .set("tickIndex", i)
+        .set("tickCount", maxTicks)
         .set("insertedRows", insertedRows)
         .set("lastOriginal", lastOriginal);
       return { ticks, insertedRows, lastOriginal, stoppedEarly: "paused" };
     }
 
-    const pct = Math.round((i / DENSE_TICKS) * 100);
     metadata
       .set("status", "replaying")
       .set("playing", true)
       .set("speed", mid.speed)
       .set("tickIndex", i)
-      .set("tickCount", DENSE_TICKS)
+      .set("tickCount", maxTicks)
       .set("progress", {
-        percentage: pct,
-        label: `Tick ${i + 1}/${DENSE_TICKS}`,
+        percentage: Math.min(99, Math.round((i / Math.max(maxTicks, 1)) * 100)),
+        label: `Tick ${i + 1}`,
         step: "tick",
       });
 
-    const result = await tickReplay(ch);
+    const result = await tickReplay(ch, batchOverride != null ? { batchOverride } : undefined);
     ticks += 1;
     insertedRows += result.inserted ?? 0;
     if (result.lastOriginal) lastOriginal = result.lastOriginal;
@@ -89,19 +95,19 @@ async function runDenseTicks(reason: string): Promise<DenseResult> {
       .set("lastOriginal", lastOriginal)
       .set("lastSkipReason", result.skipped ? result.reason ?? "skipped" : null)
       .set("progress", {
-        percentage: Math.round(((i + 1) / DENSE_TICKS) * 100),
+        percentage: Math.min(99, Math.round(((i + 1) / Math.max(maxTicks, 1)) * 100)),
         label: result.skipped
           ? `Tick ${i + 1}: ${result.reason ?? "skipped"}`
           : `Tick ${i + 1}: +${result.inserted ?? 0} rows`,
         step: "tick",
       });
 
-    logger.info("Plant replay sub-tick", { reason, i, result });
+    logger.info("Plant replay tick", { reason, i, result });
 
-    if (i < DENSE_TICKS - 1) {
-      const gapSec = Math.max(2, Math.round(9 / Math.max(0.25, mid.speed)));
-      metadata.set("nextWaitSec", gapSec);
-      await wait.for({ seconds: gapSec });
+    if (i < maxTicks - 1) {
+      const waitSec = Math.max(1, Math.round(gapSec / Math.max(0.25, mid.speed)));
+      metadata.set("nextWaitSec", waitSec);
+      await wait.for({ seconds: waitSec });
     }
   }
 
@@ -118,21 +124,45 @@ async function runDenseTicks(reason: string): Promise<DenseResult> {
   return { ticks, insertedRows, lastOriginal };
 }
 
-/** Cron spine: denser ticks once per minute; sole continuous writer. */
+/** Cron spine: short dense burst if queue is free (session holds the queue while Start plays). */
 export const plantReplay = schedules.task({
   id: "plant-replay-tick",
   cron: "* * * * *",
   queue: REPLAY_QUEUE,
-  run: async () => runDenseTicks("schedule"),
+  run: async () =>
+    runTickLoop({
+      reason: "schedule",
+      maxTicks: CRON_DENSE_TICKS,
+      gapSec: SESSION_GAP_SEC,
+    }),
 });
 
 /**
- * On-demand dense burst (Start button). Same queue as schedule so writers never overlap.
- * Returns a run handle the UI can subscribe to with Realtime.
+ * On-demand ~1s session (Start button). Same queue as cron so writers never overlap.
  */
+export const plantReplaySession = task({
+  id: "plant-replay-session",
+  queue: REPLAY_QUEUE,
+  maxDuration: 60 * 50,
+  run: async (payload?: { reason?: string }) =>
+    runTickLoop({
+      reason: payload?.reason ?? "session",
+      maxTicks: SESSION_MAX_TICKS,
+      gapSec: SESSION_GAP_SEC,
+      batchOverride: 1,
+    }),
+});
+
+/** @deprecated Prefer plant-replay-session; kept as alias for older callers. */
 export const plantReplayBurst = task({
   id: "plant-replay-burst",
   queue: REPLAY_QUEUE,
+  maxDuration: 60 * 50,
   run: async (payload?: { reason?: string }) =>
-    runDenseTicks(payload?.reason ?? "burst"),
+    runTickLoop({
+      reason: payload?.reason ?? "burst",
+      maxTicks: SESSION_MAX_TICKS,
+      gapSec: SESSION_GAP_SEC,
+      batchOverride: 1,
+    }),
 });

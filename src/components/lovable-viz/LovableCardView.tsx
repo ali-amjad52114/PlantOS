@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CardLiveContext, ChartHeightContext } from "./card-live-context";
+import { CardLiveContext, ChartHeightContext, useReplayTick } from "./card-live-context";
 import { InteractiveCardBody } from "./chart-chrome";
 import { DECKS } from "./PlantVisualDeck";
 import { LOVABLE_CARD_META } from "./card-meta";
@@ -184,6 +184,7 @@ export function LovableCardView({
   const [rangeBusy, setRangeBusy] = useState(false);
   const [pointCount, setPointCount] = useState<number | null>(null);
   const fetchGen = useRef(0);
+  const replayTick = useReplayTick();
 
   const applySeries = useCallback(
     (json: SeriesPayload, key: HistorianRangeKey, isLive: boolean) => {
@@ -247,6 +248,12 @@ export function LovableCardView({
     }, HISTORIAN_LIVE_POLL_MS);
     return () => window.clearInterval(id);
   }, [supportsRange, live, rangeKey, fetchSeries]);
+
+  // Also refetch when plant-replay-session Realtime ticks (Start playing).
+  useEffect(() => {
+    if (!supportsRange || !live || replayTick <= 0) return;
+    void fetchSeries(rangeKey, true, { silent: true });
+  }, [replayTick, supportsRange, live, rangeKey, fetchSeries]);
 
   if (!card) {
     return (

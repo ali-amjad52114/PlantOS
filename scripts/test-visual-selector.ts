@@ -20,6 +20,16 @@ const FREEFORM = [
   },
   {
     role: "engineer" as PlantRole,
+    question:
+      "Show the hydro unit, steam versus hydro MW, component temperatures, and power versus shift target from live ClickHouse.",
+    expectAny: ["HydroUnit", "HydroEnergyBars", "ComponentTemps", "PowerAndTarget"],
+    forbid: ["CostMixBubbles", "FinanceFunnelDetail"],
+    /** Top-2 must both be from Hydro & feed deck (no hard-coded preferredTypes). */
+    expectAllInTop: ["HydroUnit", "HydroEnergyBars", "ComponentTemps", "PowerAndTarget"],
+    topLimit: 2,
+  },
+  {
+    role: "engineer" as PlantRole,
     question: "Which tags are closest to limits and need attention?",
     expectAny: ["ClosestToLimit", "AssetRadar", "BearingVibration", "ThermalSignature", "ActiveAlerts"],
     forbid: ["CostMixBubbles"],
@@ -29,19 +39,45 @@ const FREEFORM = [
 let failed = 0;
 
 for (const c of FREEFORM) {
-  const r = rankSelectVisuals({ question: c.question, role: c.role, limit: 2 });
+  const limit = c.topLimit ?? 2;
+  const r = rankSelectVisuals({ question: c.question, role: c.role, limit });
   const hit = c.expectAny.some((t) => r.cardTypes.includes(t));
   const bad = (c.forbid || []).filter((t) => r.cardTypes.includes(t));
   const findOk = !c.findingsAny || c.findingsAny.some((k) => r.findingsKeys.includes(k));
-  if (!hit || bad.length || !findOk) {
+  const pool = c.expectAllInTop;
+  const allInPool =
+    !pool || r.cardTypes.every((t) => pool.includes(t));
+  if (!hit || bad.length || !findOk || !allInPool) {
     failed++;
     console.error("FAIL freeform", c.question.slice(0, 70), {
       cardTypes: r.cardTypes,
       findingsKeys: r.findingsKeys,
-      scores: r.scores.slice(0, 4),
+      scores: r.scores.slice(0, 6),
+      allInPool,
     });
   } else {
     console.log("OK freeform", r.cardTypes.join("+"), "findings=", r.findingsKeys.join(","));
+  }
+}
+
+/** Engineer Q1 (Hydro & feed): top-4 ranked types should be exactly the hydro deck set. */
+{
+  const q =
+    "Show the hydro unit, steam versus hydro MW, component temperatures, and power versus shift target from live ClickHouse.";
+  const hydro = ["HydroUnit", "HydroEnergyBars", "ComponentTemps", "PowerAndTarget"];
+  const r = rankSelectVisuals({ question: q, role: "engineer", limit: 4 });
+  const missing = hydro.filter((t) => !r.cardTypes.includes(t));
+  const extras = r.cardTypes.filter((t) => !hydro.includes(t));
+  if (missing.length || extras.length) {
+    failed++;
+    console.error("FAIL engineer Q1 top-4 hydro deck", {
+      cardTypes: r.cardTypes,
+      missing,
+      extras,
+      scores: r.scores.slice(0, 6),
+    });
+  } else {
+    console.log("OK engineer Q1 top-4", r.cardTypes.join("+"));
   }
 }
 

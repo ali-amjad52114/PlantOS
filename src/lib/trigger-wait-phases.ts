@@ -101,6 +101,7 @@ function inspectParts(parts: TriggerWaitSignals["parts"]) {
   const toolNames = new Set<string>();
   let activeTool: string | null = null;
   let completedTool = false;
+  let latestStepLabel: string | null = null;
 
   for (const part of parts) {
     const type = part.type ?? "";
@@ -130,6 +131,10 @@ function inspectParts(parts: TriggerWaitSignals["parts"]) {
         };
       }
     }
+    if (type === "data-investigation-step" && part.data) {
+      const d = part.data as { label?: string; status?: string };
+      if (d.label) latestStepLabel = d.label;
+    }
     if (type.startsWith("tool-")) {
       const name = toolNameFromType(type);
       toolNames.add(name);
@@ -139,15 +144,30 @@ function inspectParts(parts: TriggerWaitSignals["parts"]) {
     }
   }
 
-  return { auditStarted, auditComplete, toolNames: [...toolNames], activeTool, completedTool };
+  return {
+    auditStarted,
+    auditComplete,
+    toolNames: [...toolNames],
+    activeTool,
+    completedTool,
+    latestStepLabel,
+  };
 }
 
 function phaseById(id: TriggerWaitPhaseId, toolName?: string | null): TriggerWaitPhase {
   const base = LADDER.find((p) => p.id === id)!;
   if (id === "tool" && toolName) {
+    const friendly =
+      toolName === "investigateParallel"
+        ? "Fan-out engineer + ops + finance"
+        : toolName === "consultEngineer"
+          ? "Consulting engineer specialist"
+          : toolName === "selectVisuals"
+            ? "Selecting catalog visuals"
+            : toolName;
     return {
       ...base,
-      headline: `Executing ${toolName}`,
+      headline: `Executing ${friendly}`,
       primitive: `tool:${toolName} · worker-side`,
     };
   }
@@ -164,9 +184,8 @@ export function deriveTriggerWaitView(signals: TriggerWaitSignals): TriggerWaitV
   const elapsedMs = Math.max(0, signals.elapsedMs ?? 0);
   const status = signals.chatStatus || "ready";
   const busy = status === "submitted" || status === "streaming";
-  const { auditStarted, auditComplete, toolNames, activeTool, completedTool } = inspectParts(
-    signals.parts
-  );
+  const { auditStarted, auditComplete, toolNames, activeTool, completedTool, latestStepLabel } =
+    inspectParts(signals.parts);
   const binding = Boolean(signals.binding);
 
   const reached: TriggerWaitPhaseId[] = ["session"];
@@ -254,6 +273,13 @@ export function deriveTriggerWaitView(signals: TriggerWaitSignals): TriggerWaitV
     activeOut = {
       ...active,
       primitive: `streamText · toStreamTextOptions · role:${auditStarted.role}`,
+    };
+  }
+  if (activeId === "tool" && latestStepLabel) {
+    activeOut = {
+      ...activeOut,
+      headline: latestStepLabel,
+      primitive: toolForCopy ? `tool:${toolForCopy} · ${latestStepLabel}` : activeOut.primitive,
     };
   }
 

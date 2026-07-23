@@ -12,6 +12,7 @@ import { PlantShell, type ShellMode } from "@/components/plant-shell";
 import { ReplayHealth } from "@/components/replay-health";
 import { ShellOverflow } from "@/components/shell-overflow";
 import { VisualStage, agentRoleForMode } from "@/components/visual-stage";
+import { ReplayTickContext } from "@/components/lovable-viz/card-live-context";
 import { useRealtimeInvestigate } from "@/hooks/useRealtimeInvestigate";
 import { useRealtimeReplay } from "@/hooks/useRealtimeReplay";
 import {
@@ -397,9 +398,9 @@ export default function PlantOSPage() {
   const playing = Boolean(live?.control?.playing);
   const feedActive = Boolean(live?.feedActive);
 
-  // Fast poll while Start is playing so numbers visibly move.
+  // Fast poll while Start is playing so numbers visibly move (~1s with session ticks).
   useEffect(() => {
-    const ms = playing || feedActive ? 2000 : 10000;
+    const ms = playing || feedActive ? 1000 : 10000;
     const id = setInterval(() => {
       void refreshLive();
       void refreshOverview(false);
@@ -449,7 +450,7 @@ export default function PlantOSPage() {
       }
     };
     void pull();
-    const id = setInterval(() => void pull(), 2500);
+    const id = setInterval(() => void pull(), 1000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -1026,6 +1027,10 @@ export default function PlantOSPage() {
   const stageTower = tower ?? towersByMode[mode] ?? null;
   const feedLabel = feedActive ? "LIVE" : live?.control?.playing ? "STALE" : "PAUSED";
   const liveMoving = playing || feedActive || replayProgress.status === "running";
+  const replayTickKey =
+    (replayProgress.insertedRows ?? 0) * 10_000 +
+    (replayProgress.tickIndex ?? 0) +
+    (replayProgress.status === "running" ? 1 : 0);
   const liveMeta = useMemo(() => {
     const age = live?.liveAgeSec != null ? `${Math.round(live.liveAgeSec)}s` : "—";
     return `${String(live?.live?.c ?? 0)} rows · ${age}`;
@@ -1099,6 +1104,7 @@ export default function PlantOSPage() {
   );
 
   return (
+    <ReplayTickContext.Provider value={replayTickKey}>
     <PlantShell
       mode={mode}
       onModeChange={onModeChange}
@@ -1211,5 +1217,6 @@ export default function PlantOSPage() {
         />
       }
     />
+    </ReplayTickContext.Provider>
   );
 }

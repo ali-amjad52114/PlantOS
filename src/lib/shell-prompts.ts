@@ -3,12 +3,12 @@ import type { ShellMode } from "@/components/plant-shell";
 /** Three clickable starter questions per persona / overview. */
 export const MODE_QUESTIONS: Record<ShellMode, [string, string, string]> = {
   overview: [
-    "Give me a plant-wide status overview from live ClickHouse tags.",
+    "Deep brief across engineer, ops, and finance — plant-wide status from live ClickHouse (use parallel investigate).",
     "Which tags are closest to their operating limits right now?",
     "Summarize generator, turbine, and boiler health from live data.",
   ],
   engineer: [
-    "What is the current status of the generators and turbine?",
+    "Show the hydro unit, steam versus hydro MW, component temperatures, and power versus shift target from live ClickHouse.",
     "Which tags are closest to limits and need attention?",
     "Show boiler pressure and steam flow trends from ClickHouse.",
   ],
@@ -18,7 +18,7 @@ export const MODE_QUESTIONS: Record<ShellMode, [string, string, string]> = {
     "Break down operating cost into variable energy vs labour and fixed.",
   ],
   maintenance: [
-    "Which tags are closest to limits and need maintenance attention?",
+    "Deep dive boiler and turbine vibration / reliability as the engineer specialist — prioritize maintenance checks from live tags.",
     "What equipment shows the highest deviation from normal range?",
     "Prioritize maintenance checks from live boiler, turbine, and generator tags.",
   ],

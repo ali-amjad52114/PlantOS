@@ -51,7 +51,7 @@ try {
     b.click();
   });
 
-  const ask = page.locator("button").filter({ hasText: /generators and turbine/i });
+  const ask = page.locator("button").filter({ hasText: /hydro unit|steam versus hydro/i });
   await ask.first().waitFor({ state: "visible", timeout: 20000 });
   await ask.first().click();
   result.steps.asked = true;

@@ -10,6 +10,16 @@ export function useCardLive() {
   return useContext(CardLiveContext);
 }
 
+/**
+ * Advances when plant-replay-session ticks (Realtime). Historian Live cards
+ * silent-refetch on change — no per-card Trigger task.
+ */
+export const ReplayTickContext = createContext<number>(0);
+
+export function useReplayTick() {
+  return useContext(ReplayTickContext);
+}
+
 /** Pixel height for the interactive chart area (same for 1 box and 2-wide). */
 export const ChartHeightContext = createContext<number | null>(null);
 
