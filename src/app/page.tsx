@@ -7,7 +7,6 @@ import {
   triggerPlantReplayBurst,
   triggerPlantRouteInvestigate,
 } from "@/app/actions";
-import { LiveFeedStrip } from "@/components/live-feed-strip";
 import { PlantChat, type PopulateProgress } from "@/components/plant-chat";
 import { PlantShell, type ShellMode } from "@/components/plant-shell";
 import { ReplayHealth } from "@/components/replay-health";
@@ -15,11 +14,46 @@ import { ShellOverflow } from "@/components/shell-overflow";
 import { VisualStage, agentRoleForMode } from "@/components/visual-stage";
 import { useRealtimeInvestigate } from "@/hooks/useRealtimeInvestigate";
 import { useRealtimeReplay } from "@/hooks/useRealtimeReplay";
-import type { PlantTowerPayload } from "@/lib/plant-tower";
+import {
+  cardDraftFromTower,
+  createPin,
+  expandTowerIntoCardPins,
+  upsertBoundTowerAsCards,
+  type CanvasPin,
+  type CanvasPinDraft,
+} from "@/lib/canvas-pins";
+import { defaultPlantTower, type PlantTowerPayload } from "@/lib/plant-tower";
 import { resolveQuestionIndex } from "@/lib/question-card-maps";
 import { MODE_QUESTIONS } from "@/lib/shell-prompts";
 
 type AgentRole = "engineer" | "operations" | "finance";
+
+async function readJson(res: Response) {
+  const text = await res.text();
+  const ct = res.headers.get("content-type") || "";
+  if (!res.ok) {
+    throw new Error(
+      ct.includes("application/json")
+        ? (() => {
+            try {
+              const j = JSON.parse(text);
+              return String(j?.error || j?.message || text.slice(0, 200));
+            } catch {
+              return text.slice(0, 200) || `HTTP ${res.status}`;
+            }
+          })()
+        : `HTTP ${res.status}: expected JSON, got ${ct || "non-JSON"} (${text.slice(0, 60).replace(/\s+/g, " ")})`
+    );
+  }
+  if (!ct.includes("application/json") && text.trimStart().startsWith("<")) {
+    throw new Error(`Expected JSON from ${res.url}, got HTML`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid JSON from ${res.url}: ${text.slice(0, 80).replace(/\s+/g, " ")}`);
+  }
+}
 
 const SUGGESTED_ROUTE = {
   engineer: MODE_QUESTIONS.engineer[0],
@@ -55,6 +89,8 @@ export default function PlantOSPage() {
   const [stageProgress, setStageProgress] = useState<PopulateProgress | null>(null);
   const [awaitingQuestion, setAwaitingQuestion] = useState<string | null>(null);
   const [awaitingMode, setAwaitingMode] = useState<ShellMode | null>(null);
+  const [canvasPins, setCanvasPins] = useState<CanvasPin[]>([]);
+  const [e2eCanvas, setE2eCanvas] = useState(false);
   const askBridgeRef = useRef<((q: string) => void) | null>(null);
   const modeRef = useRef<ShellMode>(mode);
   modeRef.current = mode;
@@ -72,10 +108,42 @@ export default function PlantOSPage() {
   const replayProgress = useRealtimeReplay(replayRunId, replayToken);
   const agentRole = agentRoleForMode(mode);
 
+  useEffect(() => {
+    try {
+      setE2eCanvas(new URLSearchParams(window.location.search).get("e2eCanvas") === "1");
+    } catch {
+      setE2eCanvas(false);
+    }
+  }, []);
+
+  const pinVisual = useCallback((draft: CanvasPinDraft) => {
+    setCanvasPins((prev) => {
+      if (draft.payload.kind === "tower") {
+        return expandTowerIntoCardPins(prev, draft.payload.tower, draft.sourceMessageId);
+      }
+      return [...prev, createPin(draft, prev)];
+    });
+    setMobileTab("visuals");
+  }, []);
+
+  const dropPinDraft = useCallback((draft: CanvasPinDraft, at: { x: number; y: number }) => {
+    setCanvasPins((prev) => {
+      if (draft.payload.kind === "tower") {
+        return expandTowerIntoCardPins(prev, draft.payload.tower, draft.sourceMessageId, at);
+      }
+      return [...prev, createPin(draft, prev, at)];
+    });
+  }, []);
+
+  const fixtureTower = useMemo(
+    () => (e2eCanvas ? defaultPlantTower("engineer") : null),
+    [e2eCanvas]
+  );
+
   const refreshLive = useCallback(async () => {
     try {
       const r = await fetch("/api/plant/live");
-      setLive(await r.json());
+      setLive(await readJson(r));
     } catch {}
   }, []);
 
@@ -107,7 +175,7 @@ export default function PlantOSPage() {
         });
       }
       const r = await fetch("/api/plant/engineer");
-      const json = await r.json();
+      const json = await readJson(r);
       if (showProgress) {
         setPopulateProgress({
           percentage: 78,
@@ -169,10 +237,11 @@ export default function PlantOSPage() {
     const pull = async () => {
       try {
         const r = await fetch(`/api/plant/bound-tower?mode=${mode}&q=${boundQ}`);
-        const payload = await r.json();
+        const payload = await readJson(r);
         if (cancelled || payload?.error) return;
         setTower(payload);
         setTowersByMode((prev) => ({ ...prev, [mode]: payload }));
+        setCanvasPins((prev) => upsertBoundTowerAsCards(prev, payload as PlantTowerPayload));
       } catch {
         /* ignore */
       }
@@ -337,10 +406,11 @@ export default function PlantOSPage() {
       heldTowerRef.current = t;
       return;
     }
+    // PLAN_CHAT_CANVAS_PINS: agent role-default towers stay in chat for user pinning.
+    if (t.source === "role-default") return;
     const current = modeRef.current;
     const storeMode: ShellMode =
       current === "overview" ? (t.role as ShellMode) : current;
-    // Prefer ClickHouse question-map towers over agent role-default seed decks.
     setTowersByMode((prev) => {
       const existing = prev[storeMode];
       if (existing?.source === "question-map" && t.source === "role-default") return prev;
@@ -368,19 +438,10 @@ export default function PlantOSPage() {
       }
     };
 
-    // Unmapped ask: Trigger finished — apply held agent visuals, drop waiting panel.
+    // Unmapped ask: Trigger finished — apply held agent visuals; towers stay in chat for pin.
     if (pending.q == null) {
-      const heldTower = heldTowerRef.current;
       heldTowerRef.current = null;
-      if (heldTower) {
-        const storeMode: ShellMode =
-          modeRef.current === "overview" ? (heldTower.role as ShellMode) : modeRef.current;
-        setTower(heldTower);
-        setTowersByMode((prev) => ({ ...prev, [storeMode]: heldTower }));
-        flushHeldVisual(storeMode);
-      } else {
-        flushHeldVisual(modeRef.current === "overview" ? "engineer" : modeRef.current);
-      }
+      flushHeldVisual(modeRef.current === "overview" ? "engineer" : modeRef.current);
       setStageProgress(null);
       setAwaitingQuestion(null);
       setAwaitingMode(null);
@@ -400,12 +461,13 @@ export default function PlantOSPage() {
 
     try {
       const r = await fetch(`/api/plant/bound-tower?mode=${pending.mode}&q=${pending.q}`);
-      const payload = await r.json();
+      const payload = await readJson(r);
       if (payload?.error) throw new Error(payload.error);
 
       heldTowerRef.current = null;
       setTower(payload);
       setTowersByMode((prev) => ({ ...prev, [pending.mode]: payload }));
+      setCanvasPins((prev) => upsertBoundTowerAsCards(prev, payload as PlantTowerPayload));
       flushHeldVisual(pending.mode);
       setError(null);
 
@@ -624,22 +686,24 @@ export default function PlantOSPage() {
     return `${String(live?.live?.c ?? 0)} rows · ${age}`;
   }, [live]);
 
+  const replaySpeed = [1, 2, 4].includes(Number(live?.control?.speed))
+    ? Number(live?.control?.speed)
+    : 1;
+
   const replayControls = (
     <>
-      <button
-        type="button"
-        onClick={() => {
-          setMobileTab("visuals");
-          void replay("start");
-        }}
-        className={`rounded-xl px-3 py-2 text-sm font-medium ${
-          playing
-            ? "border border-[color:var(--success)]/40 bg-[color:var(--success)]/15 text-[color:var(--success)]"
-            : "border border-transparent bg-primary text-primary-foreground shadow-sm shadow-primary/30"
-        }`}
-      >
-        {playing ? "Playing…" : "Start live"}
-      </button>
+      {!playing && (
+        <button
+          type="button"
+          onClick={() => {
+            setMobileTab("visuals");
+            void replay("start");
+          }}
+          className="rounded-xl border border-transparent bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm shadow-primary/30"
+        >
+          Start live
+        </button>
+      )}
       <button
         type="button"
         onClick={() => replay("pause")}
@@ -654,20 +718,36 @@ export default function PlantOSPage() {
       >
         Reset
       </button>
-      {[1, 2, 4].map((s) => (
-        <button
-          key={s}
-          type="button"
-          onClick={() => replay("speed", s)}
-          className={`rounded-xl border px-2.5 py-2 text-sm ${
-            Number(live?.control?.speed) === s
-              ? "border-primary/40 bg-primary/10 font-medium text-primary"
-              : "border-border bg-surface text-muted-foreground hover:bg-muted"
-          }`}
+      <details className="group relative">
+        <summary
+          className="flex cursor-pointer list-none items-center gap-1 rounded-xl border border-border bg-surface px-2.5 py-2 text-sm font-medium hover:bg-muted [&::-webkit-details-marker]:hidden"
+          aria-label="Replay speed"
         >
-          {s}x
-        </button>
-      ))}
+          {replaySpeed}x
+          <span className="text-[10px] text-muted-foreground transition group-open:rotate-180">
+            ▾
+          </span>
+        </summary>
+        <div className="absolute right-0 top-[calc(100%+6px)] z-50 min-w-20 rounded-xl border border-border bg-surface p-1 shadow-xl">
+          {[1, 2, 4].map((speed) => (
+            <button
+              key={speed}
+              type="button"
+              onClick={(event) => {
+                void replay("speed", speed);
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}
+              className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${
+                replaySpeed === speed
+                  ? "bg-primary/10 font-semibold text-primary"
+                  : "text-foreground/75 hover:bg-muted"
+              }`}
+            >
+              {speed}x
+            </button>
+          ))}
+        </div>
+      </details>
     </>
   );
 
@@ -684,15 +764,6 @@ export default function PlantOSPage() {
       error={error}
       mobileTab={mobileTab}
       onMobileTab={setMobileTab}
-      liveFeedStrip={
-        <LiveFeedStrip
-          playing={playing || replayProgress.status === "running"}
-          feedActive={feedActive}
-          live={live}
-          overviewMw={overview?.productionMW}
-          replayProgress={replayProgress}
-        />
-      }
       overflowPanel={
         <div className="space-y-3">
           <ReplayHealth progress={replayProgress} />
@@ -736,7 +807,7 @@ export default function PlantOSPage() {
           mode={mode}
           onToolVisual={onToolVisual}
           onTower={onTower}
-          hideTowersInChat
+          hideTowersInChat={false}
           shell
           suggestedQuestions={MODE_QUESTIONS[mode]}
           populateProgress={populateProgress}
@@ -747,6 +818,8 @@ export default function PlantOSPage() {
           onStreamProgress={onStreamProgress}
           onAgentBusyChange={onAgentBusyChange}
           onAgentError={onAgentError}
+          onPinVisual={pinVisual}
+          fixtureTower={fixtureTower}
         />
       }
       stage={
@@ -762,6 +835,9 @@ export default function PlantOSPage() {
           liveMoving={liveMoving}
           stageProgress={awaitingMode === mode ? stageProgress : null}
           awaitingQuestion={awaitingMode === mode ? awaitingQuestion : null}
+          canvasPins={canvasPins}
+          onCanvasPinsChange={setCanvasPins}
+          onDropPinDraft={dropPinDraft}
         />
       }
     />

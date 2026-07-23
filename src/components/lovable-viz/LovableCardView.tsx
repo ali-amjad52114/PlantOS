@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { CardLiveContext } from "./card-live-context";
+import { InteractiveCardBody } from "./chart-chrome";
 import { DECKS } from "./PlantVisualDeck";
 import { LOVABLE_CARD_META } from "./card-meta";
 import type { CardBinding } from "@/lib/plant-tower";
@@ -20,8 +21,8 @@ function formatPrimary(binding: CardBinding): string {
   return binding.unit ? `${n} ${binding.unit}` : n;
 }
 
-/** Left live read — value only, no CH / ClickHouse labels. */
-function LiveRead({ binding }: { binding: CardBinding }) {
+/** Top-right live value only — no LIVE label, no tag caption. */
+function LiveValue({ binding }: { binding: CardBinding }) {
   const prev = useRef<number | null>(null);
   const [flash, setFlash] = useState(false);
 
@@ -38,21 +39,11 @@ function LiveRead({ binding }: { binding: CardBinding }) {
   }, [binding.primary]);
 
   return (
-    <div className="flex h-full min-h-0 w-[7.25rem] shrink-0 flex-col justify-end border-r border-border/60 pr-2.5">
-      <div className={flash ? "count-flash" : ""}>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Live</div>
-        <div className="mt-0.5 break-words text-lg font-semibold leading-tight tabular text-foreground">
-          {formatPrimary(binding)}
-        </div>
-        {binding.caption && (
-          <p className="mt-1 line-clamp-3 text-[9px] leading-snug text-muted-foreground">
-            {binding.caption}
-          </p>
-        )}
-        {binding.synthetic && (
-          <p className="mt-1 text-[9px] font-medium text-[color:var(--warning)]">Synthetic $</p>
-        )}
-      </div>
+    <div
+      className={`shrink-0 text-right text-lg font-semibold leading-tight tabular text-foreground ${flash ? "count-flash" : ""}`}
+      data-live-value="true"
+    >
+      {formatPrimary(binding)}
     </div>
   );
 }
@@ -62,14 +53,16 @@ export function LovableCardView({
   label,
   hint,
   binding,
+  compact = false,
 }: {
   type: string;
   label?: string | null;
   hint?: string | null;
   binding?: CardBinding | null;
+  /** Tighter min-height for canvas pins. */
+  compact?: boolean;
 }) {
   const card = cardByType[type];
-  const meta = LOVABLE_CARD_META.find((m) => m.type === type);
   if (!card) {
     return (
       <div className="rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
@@ -78,33 +71,32 @@ export function LovableCardView({
     );
   }
 
-  const bound = Boolean(binding);
-
   return (
     <CardLiveContext.Provider value={binding ?? null}>
       <article
-        className="card-surface relative overflow-hidden p-4 rise"
-        style={{ background: card.bg, minHeight: 260 }}
+        data-lovable-card={type}
+        data-interactive-card="true"
+        className="card-surface relative flex flex-col overflow-visible p-4 rise"
+        style={{ background: card.bg, minHeight: compact ? 200 : 300 }}
       >
-        <div className="mb-3">
-          <div className="text-sm font-semibold text-foreground">{label ?? card.label}</div>
-          <div className="text-[11px] text-muted-foreground">{hint ?? card.hint}</div>
-          {meta && (
-            <div className="mt-1 text-[10px] font-semibold uppercase tracking-widest text-primary">
-              Lovable Visual {meta.deck} · {meta.deckName}
-            </div>
-          )}
+        {/* Top: title + hint left, live value right */}
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-foreground">{label ?? card.label}</div>
+            <div className="text-[11px] text-muted-foreground">{hint ?? card.hint}</div>
+          </div>
+          {binding ? <LiveValue binding={binding} /> : null}
         </div>
-        <div className={`flex h-44 gap-0 ${bound ? "items-stretch" : ""}`}>
-          {bound && binding ? <LiveRead binding={binding} /> : null}
-          <div className="relative min-h-0 min-w-0 flex-1">{card.render()}</div>
+        {/* Bottom: full-width interactive chart */}
+        <div className="relative h-56 min-h-0 w-full min-w-0 flex-1 overflow-visible">
+          <InteractiveCardBody type={type} />
         </div>
       </article>
     </CardLiveContext.Provider>
   );
 }
 
-/** Registry map: each Lovable card type → json-render component. */
+/** Registry map: each Lovable/Replit card type → json-render component. */
 export function buildLovableRegistryEntries() {
   const entries: Record<
     string,

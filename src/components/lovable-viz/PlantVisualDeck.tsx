@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { REPLIT_DECKS } from "./replit-visuals";
 import { useCardLive } from "./card-live-context";
@@ -18,18 +20,20 @@ import {
   RadarChart,
   ReferenceLine,
   ResponsiveContainer,
+  Tooltip,
 } from "recharts";
 import { useCountUp, useLiveNumber, fmt } from "./animations";
+import { chartMargin, LovableAxes, LovableTooltip, useBoundSeries, InteractiveCardBody } from "./chart-chrome";
 
 /* ------------------------------------------------------------------
    Data
 ------------------------------------------------------------------ */
 const wave = Array.from({ length: 40 }, (_, i) => ({
-  d: i,
+  t: i,
   v: 60 + Math.sin(i / 3) * 30 + Math.cos(i / 5) * 12 + i * 1.2,
 }));
 const bars = Array.from({ length: 14 }, (_, i) => ({
-  d: i,
+  t: i,
   v: 20 + Math.abs(Math.sin(i * 0.9)) * 60 + Math.random() * 10,
 }));
 const donut = [
@@ -72,23 +76,28 @@ const CH5 = "var(--chart-5)";
 /* ---------- individual visuals ---------- */
 
 function LiveArea() {
+  const { data, unit } = useBoundSeries(wave);
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={wave} margin={{ top: 8, right: 0, left: 0, bottom: 0 }}>
+      <AreaChart data={data} margin={chartMargin}>
         <defs>
           <linearGradient id="v-area" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor={CH1} stopOpacity={0.85} />
             <stop offset="100%" stopColor={CH1} stopOpacity={0} />
           </linearGradient>
         </defs>
+        <LovableAxes />
+        <LovableTooltip unit={unit || "MW"} />
         <Area
           type="monotone"
           dataKey="v"
+          name="Value"
           stroke={CH1}
           strokeWidth={2.5}
           fill="url(#v-area)"
           isAnimationActive
           animationDuration={1400}
+          activeDot={{ r: 4, strokeWidth: 0 }}
         />
       </AreaChart>
     </ResponsiveContainer>
@@ -96,52 +105,86 @@ function LiveArea() {
 }
 
 function LiveBars() {
+  const { data, unit } = useBoundSeries(bars);
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={bars} margin={{ top: 8, right: 0, left: 0, bottom: 0 }}>
+      <BarChart data={data} margin={chartMargin}>
         <defs>
           <linearGradient id="v-bar" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor={CH2} />
             <stop offset="100%" stopColor={CH1} />
           </linearGradient>
         </defs>
-        <Bar dataKey="v" fill="url(#v-bar)" radius={[6, 6, 0, 0]} animationDuration={1200} />
+        <LovableAxes />
+        <LovableTooltip unit={unit || "MW"} />
+        <Bar
+          dataKey="v"
+          name="Value"
+          fill="url(#v-bar)"
+          radius={[6, 6, 0, 0]}
+          animationDuration={1200}
+        />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
 function Donut() {
-  const live = useCardLive();
+  const bound = useCardLive();
+  const data =
+    bound?.items?.length && bound.items.length >= 2
+      ? bound.items.slice(0, 4).map((it) => ({
+          name: it.label,
+          value: Math.max(0.01, Math.abs(Number(it.value))),
+        }))
+      : donut;
   return (
-    <div className="relative h-full w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
-          <Pie
-            data={donut}
-            dataKey="value"
-            innerRadius="55%"
-            outerRadius="85%"
-            paddingAngle={3}
-            stroke="none"
-            animationDuration={1400}
-          >
-            {donut.map((_, i) => (
-              <Cell key={i} fill={[CH1, CH2, CH3, CH4][i]} />
-            ))}
-          </Pie>
-        </PieChart>
-      </ResponsiveContainer>
-      {!live && (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
-          <div>
-            <div className="text-2xl font-semibold tabular">
-              <CU value={248} />k
-            </div>
-            <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Energy $</div>
+    <div className="relative grid h-full w-full grid-cols-[1fr_auto] items-center gap-2">
+      <div className="relative min-h-0 min-w-0 h-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const row = payload[0];
+                const v = typeof row.value === "number" ? row.value : Number(row.value);
+                return (
+                  <div className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-[10px] shadow-lg">
+                    <div className="font-semibold">{String(row.name)}</div>
+                    <div className="font-mono tabular">
+                      {Number.isFinite(v) ? v.toFixed(1) : "—"}
+                      {bound?.unit === "USD" ? " $" : bound?.unit ? ` ${bound.unit}` : "%"}
+                    </div>
+                  </div>
+                );
+              }}
+            />
+            <Pie
+              data={data}
+              dataKey="value"
+              nameKey="name"
+              innerRadius="52%"
+              outerRadius="82%"
+              paddingAngle={3}
+              stroke="none"
+              animationDuration={1400}
+            >
+              {data.map((_, i) => (
+                <Cell key={i} fill={[CH1, CH2, CH3, CH4][i % 4]} />
+              ))}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex flex-col gap-1.5 pr-1 text-[10px]">
+        {data.map((d, i) => (
+          <div key={d.name} className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full" style={{ background: [CH1, CH2, CH3, CH4][i % 4] }} />
+            <span className="max-w-[4.5rem] truncate text-muted-foreground">{d.name}</span>
+            <span className="ml-auto font-mono font-semibold tabular">{Number(d.value).toFixed(0)}</span>
           </div>
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
@@ -152,8 +195,10 @@ function Gauge({ value = 74, color = CH1 }: { value?: number; color?: string }) 
   const c = 2 * Math.PI * 42;
   const dash = (Math.min(100, Math.max(0, shown)) / 100) * c;
   const n = useCountUp(shown, 1200);
+  const actual = live?.items?.find((i) => /actual/i.test(i.label));
+  const target = live?.items?.find((i) => /target/i.test(i.label));
   return (
-    <div className="relative grid h-full w-full place-items-center">
+    <div className="relative grid h-full w-full place-items-center" title={live?.caption || `${shown.toFixed(1)}% of target`}>
       <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
         <circle cx="50" cy="50" r="42" stroke="var(--muted)" strokeWidth="10" fill="none" />
         <circle
@@ -168,12 +213,17 @@ function Gauge({ value = 74, color = CH1 }: { value?: number; color?: string }) 
           style={{ transition: "stroke-dasharray 1.4s cubic-bezier(0.2,0.7,0.2,1)" }}
         />
       </svg>
-      {!live && (
-        <div className="absolute text-center">
-          <div className="text-2xl font-semibold tabular">{Math.round(n)}%</div>
-          <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Of target</div>
-        </div>
-      )}
+      <div className="absolute text-center">
+        <div className="font-mono text-2xl font-semibold tabular">{Math.round(n)}%</div>
+        <div className="text-[9px] uppercase tracking-widest text-muted-foreground">Of target</div>
+        {(actual || target) && (
+          <div className="mt-1 font-mono text-[9px] tabular text-muted-foreground">
+            {actual ? actual.value.toFixed(0) : "—"}
+            {" / "}
+            {target ? target.value.toFixed(0) : "—"} MWh
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -182,25 +232,40 @@ function PulseNumber({ base, prefix = "", suffix = "" }: { base: number; prefix?
   const live = useCardLive();
   const seed = useLiveNumber(base, 0.006, 1800);
   const n = useCountUp(seed, 900);
-  // When bound, left column owns the number — keep only the spark so nothing fights it.
-  if (live) {
-    return (
-      <div className="flex h-full flex-col justify-end">
-        <div className="h-16">
-          <LiveArea />
-        </div>
-      </div>
-    );
-  }
+  const { data } = useBoundSeries(wave);
+  const unit = live?.unit || (prefix === "$" ? "USD" : undefined);
+  // Always full-height interactive trend — left LiveRead owns the big number when bound.
   return (
-    <div className="flex h-full flex-col justify-center">
-      <div className="text-5xl font-semibold leading-none tabular">
-        {prefix}
-        {fmt(n, { decimals: 0 })}
-        {suffix}
-      </div>
-      <div className="mt-3 h-14">
-        <LiveArea />
+    <div className="flex h-full min-h-0 flex-col">
+      {!live && (
+        <div className="mb-1 shrink-0 text-3xl font-semibold leading-none tabular">
+          {prefix}
+          {fmt(n, { decimals: 0 })}
+          {suffix}
+        </div>
+      )}
+      <div className="min-h-0 flex-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={chartMargin}>
+            <defs>
+              <linearGradient id="pulse-area" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor={CH1} stopOpacity={0.85} />
+                <stop offset="100%" stopColor={CH1} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <LovableAxes />
+            <LovableTooltip unit={unit || "MW"} />
+            <Area
+              type="monotone"
+              dataKey="v"
+              name="Value"
+              stroke={CH1}
+              strokeWidth={2.5}
+              fill="url(#pulse-area)"
+              activeDot={{ r: 4, strokeWidth: 0 }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
@@ -591,19 +656,38 @@ const throughput = Array.from({ length: 40 }, (_, i) => ({
   actual: 460 + Math.sin(i / 2) * 22 + Math.random() * 18,
   target: 485,
 }));
+const throughputSeed = throughput.map((r) => ({ t: r.t, v: r.actual }));
 
 function ThroughputTimeline() {
+  const bound = useBoundSeries(throughputSeed);
+  const data = bound.live
+    ? bound.data.map((p) => ({ t: p.t, actual: p.v, target: bound.primary || undefined }))
+    : throughput;
+  const unit = bound.unit || "MW";
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={throughput} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+      <AreaChart data={data} margin={chartMargin}>
         <defs>
           <linearGradient id="tt" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor={CH1} stopOpacity={0.7} />
             <stop offset="100%" stopColor={CH1} stopOpacity={0} />
           </linearGradient>
         </defs>
-        <ReferenceLine y={485} stroke={CH2} strokeDasharray="4 4" strokeOpacity={0.6} />
-        <Area type="monotone" dataKey="actual" stroke={CH1} strokeWidth={2} fill="url(#tt)" animationDuration={1600} />
+        <LovableAxes />
+        <LovableTooltip unit={unit} />
+        {!bound.live && (
+          <ReferenceLine y={485} stroke={CH2} strokeDasharray="4 4" strokeOpacity={0.6} />
+        )}
+        <Area
+          type="monotone"
+          dataKey="actual"
+          name="Actual"
+          stroke={CH1}
+          strokeWidth={2}
+          fill="url(#tt)"
+          animationDuration={1600}
+          activeDot={{ r: 4, strokeWidth: 0 }}
+        />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -656,12 +740,23 @@ function QualityRings() {
 }
 
 function AlertFeed() {
-  const alerts = [
-    { id: "P2_VT", msg: "Vibration near band edge", tone: "danger", time: "09:35" },
-    { id: "P4_ST", msg: "MW below shift pace", tone: "warning", time: "09:35" },
-    { id: "P1_LIT", msg: "Drum level drifting high", tone: "info", time: "09:34" },
-    { id: "P3_LT", msg: "Water level approaching LL", tone: "danger", time: "09:33" },
-  ];
+  const bound = useCardLive();
+  const alerts =
+    bound?.items?.length
+      ? bound.items.map((it) => ({
+          id: it.label.slice(0, 12),
+          msg: `${it.value.toFixed(2)}${it.unit ? ` ${it.unit}` : ""}${
+            it.tone === "danger" ? " · out of band" : ""
+          }`,
+          tone: it.tone === "danger" ? "danger" : it.tone === "warning" ? "warning" : "info",
+          time: "live",
+        }))
+      : [
+          { id: "P2_VT", msg: "Vibration near band edge", tone: "danger", time: "09:35" },
+          { id: "P4_ST", msg: "MW below shift pace", tone: "warning", time: "09:35" },
+          { id: "P1_LIT", msg: "Drum level drifting high", tone: "info", time: "09:34" },
+          { id: "P3_LT", msg: "Water level approaching LL", tone: "danger", time: "09:33" },
+        ];
   const toneMap: Record<string, string> = { danger: "var(--danger)", warning: "var(--warning)", info: CH2 };
   return (
     <div className="flex h-full flex-col gap-1.5 overflow-hidden">
@@ -688,100 +783,175 @@ function AlertFeed() {
   );
 }
 
+const shiftBarSeed = [
+  { t: "Line A", planned: 1200, actual: 1310 },
+  { t: "Line B", planned: 1100, actual: 940 },
+  { t: "Line C", planned: 1150, actual: 1250 },
+  { t: "Line D", planned: 950, actual: 820 },
+];
+
 function ShiftBars() {
-  const data = [
-    { line: "Line A", planned: 1200, actual: 1310 },
-    { line: "Line B", planned: 1100, actual: 940 },
-    { line: "Line C", planned: 1150, actual: 1250 },
-    { line: "Line D", planned: 950, actual: 820 },
-  ];
+  const bound = useCardLive();
+  const data =
+    bound?.items && bound.items.length >= 2
+      ? bound.items.slice(0, 4).map((it) => ({
+          t: it.label,
+          actual: Number(it.value),
+          planned: Number(bound.primary) || Number(it.value),
+        }))
+      : shiftBarSeed;
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-        <Bar dataKey="planned" fill={CH4} radius={[4, 4, 0, 0]} animationDuration={1200} />
-        <Bar dataKey="actual" fill={CH1} radius={[4, 4, 0, 0]} animationDuration={1400} />
+      <BarChart data={data} margin={chartMargin}>
+        <LovableAxes xKey="t" />
+        <LovableTooltip unit={bound?.unit || "MWh"} valueDecimals={1} />
+        <Bar dataKey="planned" name="Planned" fill={CH4} radius={[4, 4, 0, 0]} animationDuration={1200} />
+        <Bar dataKey="actual" name="Actual" fill={CH1} radius={[4, 4, 0, 0]} animationDuration={1400} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
+const bigNumberSparkSeed = Array.from({ length: 24 }, (_, i) => ({
+  t: i,
+  v: 40 + Math.sin(i / 2) * 15 + (i % 5),
+}));
+
 function BigNumber({ value, unit, decimals = 0, sub, color = CH1 }: { value: number; unit: string; decimals?: number; sub?: string; color?: string }) {
-  const live = useLiveNumber(value, 0.004, 1800);
-  const n = useCountUp(live, 900);
-  const spark = Array.from({ length: 24 }, (_, i) => 40 + Math.sin(i / 2) * 15 + Math.random() * 6);
-  const max = Math.max(...spark);
+  const bound = useCardLive();
+  const display = bound && Number.isFinite(bound.primary) ? Number(bound.primary) : value;
+  const displayUnit = bound?.unit || unit;
+  const n = useCountUp(display, 900);
+  const { data } = useBoundSeries(bigNumberSparkSeed);
   return (
-    <div className="flex h-full flex-col justify-between">
-      <div>
-        <div className="flex items-baseline gap-2 font-mono">
-          <span className="text-4xl font-bold tabular" style={{ color }}>
-            {fmt(n, { decimals })}
-          </span>
-          <span className="text-sm font-medium text-muted-foreground">{unit}</span>
+    <div className="flex h-full flex-col justify-between gap-1">
+      {!bound && (
+        <div>
+          <div className="flex items-baseline gap-2 font-mono">
+            <span className="text-4xl font-bold tabular" style={{ color }}>
+              {fmt(n, { decimals })}
+            </span>
+            <span className="text-sm font-medium text-muted-foreground">{displayUnit}</span>
+          </div>
+          {sub && <div className="mt-1 text-[11px] text-muted-foreground">{sub}</div>}
         </div>
-        {sub && <div className="mt-1 text-[11px] text-muted-foreground">{sub}</div>}
+      )}
+      <div className={`min-h-0 w-full ${bound ? "h-full" : "h-14"}`}>
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={chartMargin}>
+            <defs>
+              <linearGradient id="bn-area" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor={color} stopOpacity="0.55" />
+                <stop offset="100%" stopColor={color} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <LovableAxes />
+            <LovableTooltip unit={displayUnit} />
+            <Area
+              type="monotone"
+              dataKey="v"
+              name={displayUnit || "Value"}
+              stroke={color}
+              strokeWidth={1.8}
+              fill="url(#bn-area)"
+              activeDot={{ r: 3.5, strokeWidth: 0 }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
-      <svg viewBox="0 0 100 30" className="h-10 w-full" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id={`bn-${color}`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.5" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <polyline
-          points={spark.map((v, i) => `${(i / 23) * 100},${30 - (v / max) * 24}`).join(" ")}
-          fill="none"
-          stroke={color}
-          strokeWidth="1.4"
-          style={{ filter: `drop-shadow(0 0 4px ${color})` }}
-        />
-      </svg>
     </div>
   );
 }
 
+const processSeed = Array.from({ length: 30 }, (_, i) => ({
+  t: i,
+  output: 240 + Math.sin(i / 3) * 20 + i * 1.5,
+  demand: 260 + Math.cos(i / 4) * 8,
+}));
+
 function ProcessSignals() {
-  const data = Array.from({ length: 30 }, (_, i) => ({
-    t: i,
-    output: 240 + Math.sin(i / 3) * 20 + i * 1.5,
-    demand: 260 + Math.cos(i / 4) * 8,
-  }));
+  const bound = useBoundSeries(processSeed.map((r) => ({ t: r.t, v: r.output })));
+  const data = bound.live
+    ? bound.data.map((p) => ({ t: p.t, output: p.v }))
+    : processSeed;
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-        <Line type="monotone" dataKey="output" stroke={CH1} strokeWidth={2.5} dot={false} style={{ filter: `drop-shadow(0 0 4px ${CH1})` }} animationDuration={1600} />
-        <Line type="monotone" dataKey="demand" stroke={CH2} strokeWidth={2} dot={false} animationDuration={1600} />
+      <LineChart data={data} margin={chartMargin}>
+        <LovableAxes />
+        <LovableTooltip unit={bound.unit || "MW"} />
+        <Line
+          type="monotone"
+          dataKey="output"
+          name="Output"
+          stroke={CH1}
+          strokeWidth={2.5}
+          dot={false}
+          activeDot={{ r: 4, strokeWidth: 0 }}
+          style={{ filter: `drop-shadow(0 0 4px ${CH1})` }}
+          animationDuration={1600}
+        />
+        {!bound.live && (
+          <Line
+            type="monotone"
+            dataKey="demand"
+            name="Demand"
+            stroke={CH2}
+            strokeWidth={2}
+            dot={false}
+            animationDuration={1600}
+          />
+        )}
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
 function ConditionBars() {
-  const items = [
-    { l: "Generator load", v: 92 },
-    { l: "Turbine speed", v: 87 },
-    { l: "Boiler pressure", v: 89 },
-    { l: "Water supply", v: 94 },
-  ];
+  const bound = useCardLive();
+  const items =
+    bound?.items?.length
+      ? bound.items.map((it) => ({
+          l: it.label,
+          v: Number(it.value),
+          unit: it.unit || "",
+          tone: it.tone,
+          pct: it.tone === "danger" ? 100 : 72,
+        }))
+      : [
+          { l: "Generator load", v: 92, unit: "%", tone: undefined as string | undefined, pct: 92 },
+          { l: "Turbine speed", v: 87, unit: "%", tone: undefined, pct: 87 },
+          { l: "Boiler pressure", v: 89, unit: "%", tone: undefined, pct: 89 },
+          { l: "Water supply", v: 94, unit: "%", tone: undefined, pct: 94 },
+        ];
   return (
     <div className="flex h-full flex-col justify-around gap-2">
-      {items.map((it, i) => (
-        <div key={it.l} className="flex items-center gap-2 text-[11px]">
-          <span className="w-24 shrink-0 text-foreground/80">{it.l}</span>
-          <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
-            <div
-              className="absolute inset-y-0 left-0 rounded-full bar-grow"
-              style={{
-                width: `${it.v}%`,
-                background: `linear-gradient(90deg, ${CH2}, ${CH1})`,
-                animationDelay: `${i * 100}ms`,
-                boxShadow: `0 0 8px ${CH1}`,
-              }}
-            />
+      {items.map((it, i) => {
+        const danger = it.tone === "danger";
+        const barColor = danger ? "var(--danger)" : CH1;
+        return (
+          <div key={it.l} className="flex items-center gap-2 text-[11px]" title={`${it.l}: ${it.v}${it.unit}`}>
+            <span className="w-24 shrink-0 truncate text-foreground/80">{it.l}</span>
+            <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bar-grow"
+                style={{
+                  width: `${it.pct}%`,
+                  background: `linear-gradient(90deg, ${CH2}, ${barColor})`,
+                  animationDelay: `${i * 100}ms`,
+                  boxShadow: `0 0 8px ${barColor}`,
+                }}
+              />
+            </div>
+            <span
+              className="min-w-[3.25rem] text-right font-mono text-[10px] font-semibold tabular"
+              style={danger ? { color: "var(--danger)" } : undefined}
+            >
+              {Number.isFinite(it.v) ? it.v.toFixed(it.unit === "%" ? 0 : 2) : "—"}
+              {it.unit ? ` ${it.unit}` : ""}
+            </span>
           </div>
-          <span className="w-8 text-right font-mono font-semibold">{it.v}%</span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -1083,24 +1253,43 @@ function HalfGauge() {
   );
 }
 
+const windSeed = Array.from({ length: 22 }, (_, i) => ({
+  t: i,
+  v: 220 + Math.abs(Math.sin(i / 2)) * 90,
+}));
+
 function WindEnergyBars() {
-  // Replit wind chart shape → steam MW bars + hydro MW line (plant tags)
-  const data = Array.from({ length: 22 }, (_, i) => ({
-    t: i,
-    steam: 220 + Math.abs(Math.sin(i / 2)) * 90 + Math.random() * 12,
-    hydro: 8 + Math.sin(i / 3) * 3 + Math.random() * 1.5,
-  }));
+  const bound = useBoundSeries(windSeed);
+  const data = bound.live
+    ? bound.data.map((p) => ({ t: p.t, steam: p.v }))
+    : windSeed.map((p, i) => ({
+        t: p.t,
+        steam: p.v,
+        hydro: 8 + Math.sin(i / 3) * 3,
+      }));
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+      <BarChart data={data} margin={chartMargin}>
         <defs>
           <linearGradient id="we-b" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor={CH1} stopOpacity="0.95" />
             <stop offset="100%" stopColor={CH1} stopOpacity="0.4" />
           </linearGradient>
         </defs>
-        <Bar dataKey="steam" fill="url(#we-b)" radius={[3, 3, 0, 0]} animationDuration={1200} />
-        <Line type="monotone" dataKey="hydro" stroke="white" strokeWidth={1.6} dot={false} style={{ filter: "drop-shadow(0 0 4px white)" }} />
+        <LovableAxes />
+        <LovableTooltip unit={bound.unit || "MW"} />
+        <Bar dataKey="steam" name="Steam MW" fill="url(#we-b)" radius={[3, 3, 0, 0]} animationDuration={1200} />
+        {!bound.live && (
+          <Line
+            type="monotone"
+            dataKey="hydro"
+            name="Hydro MW"
+            stroke="white"
+            strokeWidth={1.6}
+            dot={false}
+            style={{ filter: "drop-shadow(0 0 4px white)" }}
+          />
+        )}
       </BarChart>
     </ResponsiveContainer>
   );
@@ -1108,22 +1297,33 @@ function WindEnergyBars() {
 
 function TargetProgress() {
   const bound = useCardLive();
-  const target = 150000;
   const seed = useLiveNumber(147732, 0.002, 2000);
-  const pct = bound && Number.isFinite(bound.primary)
-    ? Math.min(1, Math.max(0, Number(bound.primary) / 100))
-    : Math.min(1, seed / target);
+  const actualItem = bound?.items?.find((i) => /actual/i.test(i.label));
+  const targetItem = bound?.items?.find((i) => /target/i.test(i.label));
+  const target = targetItem ? Number(targetItem.value) : 150000;
+  const actualMWh = actualItem
+    ? Number(actualItem.value)
+    : bound && bound.unit === "%" && Number.isFinite(bound.primary)
+      ? (Number(bound.primary) / 100) * target
+      : bound && Number.isFinite(bound.primary) && bound.unit !== "%"
+        ? Number(bound.primary)
+        : seed;
+  const pct = target > 0 ? Math.min(1, Math.max(0, actualMWh / target)) : 0;
   const completeLabel = (pct * 100).toFixed(1);
+  const delta = actualMWh - target;
   return (
     <div className="flex h-full flex-col justify-center gap-2">
       <div className="grid grid-cols-3 gap-1 text-[8px] uppercase tracking-widest text-muted-foreground">
         <div>
-          <div className="font-mono text-xs font-bold text-foreground tabular">{(target / 1000).toFixed(0)}k</div>
-          Target
+          <div className="font-mono text-xs font-bold text-foreground tabular">
+            {target.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          </div>
+          Target MWh
         </div>
         <div className="text-center">
           <div className="font-mono text-xs font-bold tabular" style={{ color: CH1 }}>
-            {bound ? "—" : (seed - target).toFixed(0)}
+            {delta >= 0 ? "+" : ""}
+            {delta.toFixed(0)}
           </div>
           Delta
         </div>
@@ -1133,13 +1333,23 @@ function TargetProgress() {
         </div>
       </div>
       <div className="relative h-2.5 overflow-hidden rounded-full bg-muted">
-        <div className="absolute inset-y-0 left-0 rounded-full bar-grow" style={{ width: `${pct * 100}%`, background: `linear-gradient(90deg, ${CH2}, ${CH1})`, boxShadow: `0 0 10px ${CH1}` }} />
-        <div className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background" style={{ left: `${pct * 100}%`, background: CH1, boxShadow: `0 0 10px ${CH1}` }} />
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bar-grow"
+          style={{
+            width: `${pct * 100}%`,
+            background: `linear-gradient(90deg, ${CH2}, ${CH1})`,
+            boxShadow: `0 0 10px ${CH1}`,
+          }}
+        />
+        <div
+          className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background"
+          style={{ left: `${pct * 100}%`, background: CH1, boxShadow: `0 0 10px ${CH1}` }}
+        />
       </div>
       <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
         <span>0</span>
-        <span className="pulse-live" style={{ color: CH1 }}>
-          ● live
+        <span className="tabular" style={{ color: CH1 }}>
+          {actualMWh.toFixed(1)} MWh
         </span>
         <span>{target.toLocaleString()}</span>
       </div>
@@ -1242,31 +1452,51 @@ function RiverStream() {
 }
 
 function SCurveTrend() {
-  const series = [
+  const bound = useBoundSeries(
+    Array.from({ length: 12 }, (_, i) => ({
+      t: i,
+      v: 20 + 70 / (1 + Math.exp(-(i - 6) / 1.4)),
+    }))
+  );
+  const seedSeries = [
     { name: "Actual MW", c: CH1, data: Array.from({ length: 12 }, (_, i) => 20 + 70 / (1 + Math.exp(-(i - 6) / 1.4))) },
     { name: "Plan", c: CH5, data: Array.from({ length: 12 }, (_, i) => 30 + 40 / (1 + Math.exp(-(i - 7) / 1.6))) },
     { name: "Forecast", c: "var(--muted-foreground)", data: Array.from({ length: 12 }, (_, i) => 28 + 25 / (1 + Math.exp(-(i - 8) / 2))) },
   ];
-  const merged = series[0].data.map((_, i) => {
-    const row: Record<string, number> = { t: i };
-    series.forEach((s) => (row[s.name] = s.data[i]));
-    return row;
-  });
+  const merged = bound.live
+    ? bound.data.map((p) => ({ t: p.t, "Actual MW": p.v }))
+    : seedSeries[0].data.map((_, i) => {
+        const row: Record<string, string | number> = { t: i };
+        seedSeries.forEach((s) => (row[s.name] = s.data[i]));
+        return row;
+      });
+  const legend = bound.live
+    ? [{ name: "Actual MW", c: CH1 }]
+    : seedSeries.map((s) => ({ name: s.name, c: s.c }));
   return (
     <div className="grid h-full w-full grid-cols-[1fr_auto] items-stretch gap-3">
       <div className="relative min-w-0">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={merged} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
-            {series.map((s) => (
-              <Line key={s.name} type="monotone" dataKey={s.name} stroke={s.c} strokeWidth={2.5} dot={false} animationDuration={1600} />
+          <LineChart data={merged} margin={chartMargin}>
+            <LovableAxes />
+            <LovableTooltip unit={bound.unit || "MW"} />
+            {legend.map((s) => (
+              <Line
+                key={s.name}
+                type="monotone"
+                dataKey={s.name}
+                stroke={s.c}
+                strokeWidth={2.5}
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 0 }}
+                animationDuration={1600}
+              />
             ))}
           </LineChart>
         </ResponsiveContainer>
-        <div className="pointer-events-none absolute left-[45%] top-0 h-full w-px border-l border-dashed border-border" />
-        <div className="absolute left-[45%] top-1 -translate-x-1/2 rounded-md bg-foreground px-2 py-0.5 text-[10px] font-mono font-semibold text-background shadow">45 <span style={{ color: "var(--success)" }}>+1.2%</span></div>
       </div>
       <div className="flex flex-col justify-center gap-1.5">
-        {series.map((s) => (
+        {legend.map((s) => (
           <div
             key={s.name}
             className="rounded-full border px-2 py-0.5 text-[10px] font-semibold shadow-sm"
@@ -1334,7 +1564,7 @@ export const DECKS: { name: string; tag: string; roleHint: string; cards: Card[]
     cards: [
       { id: "EnergyValueTrend", label: "Shift energy value", hint: "$ from P4_ST_PO × price", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH1} 14%, var(--surface)), var(--surface))`, render: () => <PulseNumber base={248420} prefix="$" /> },
       { id: "PowerSourceMix", label: "Steam vs hydro mix", hint: "ST_PO vs HT_PO share", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH2} 12%, var(--surface)), var(--surface))`, render: () => <Donut /> },
-      { id: "TargetAttainment", label: "Target attainment", hint: "MWh vs shift target", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH3} 12%, var(--surface)), var(--surface))`, render: () => <Gauge value={74} color={CH3} /> },
+      { id: "TargetAttainment", label: "Target attainment", hint: "MWh vs shift target", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH3} 12%, var(--surface)), var(--surface))`, render: () => <TargetProgress /> },
       { id: "ProductionVolume", label: "Production volume", hint: "Recent MW pulse", bg: `linear-gradient(135deg, color-mix(in oklab, ${CH4} 12%, var(--surface)), var(--surface))`, render: () => <LiveBars /> },
     ],
   },
@@ -1594,8 +1824,10 @@ export function PlantVisualDeck() {
           {deck.cards.map((c, i) => (
             <article
               key={c.id}
-              className="card-surface relative overflow-hidden p-4 rise"
-              style={{ animationDelay: `${i * 90}ms`, background: c.bg, minHeight: 260 }}
+              data-lovable-card={c.id}
+              data-interactive-card="true"
+              className="card-surface relative overflow-visible p-4 rise"
+              style={{ animationDelay: `${i * 90}ms`, background: c.bg, minHeight: 300 }}
             >
               <div className="mb-3 flex items-start justify-between">
                 <div>
@@ -1604,14 +1836,12 @@ export function PlantVisualDeck() {
                 </div>
                 <span className="flex items-center gap-1.5 rounded-full bg-surface/70 px-2 py-0.5 text-[10px] font-semibold text-foreground/70 backdrop-blur">
                   <span className="pulse-live h-1.5 w-1.5 rounded-full bg-[color:var(--success)]" />
-                  Live
+                  Interactive
                 </span>
               </div>
-              <div className="relative h-44">{c.render()}</div>
-              <div
-                className="pointer-events-none absolute -right-10 -bottom-10 h-32 w-32 rounded-full opacity-40 blur-3xl"
-                style={{ background: `radial-gradient(circle, ${CH2}, transparent 70%)` }}
-              />
+              <div className="relative h-52">
+                <InteractiveCardBody type={c.id} />
+              </div>
             </article>
           ))}
         </div>

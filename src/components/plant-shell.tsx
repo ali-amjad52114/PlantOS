@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import type { ReactNode } from "react";
 import { MoreHorizontal, X } from "lucide-react";
 import { LovablePaletteControls } from "@/components/palette-playground";
@@ -13,12 +14,12 @@ export type ShellMode =
   | "operations";
 
 export const SHELL_MODES: { id: ShellMode; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "engineer", label: "Engineer" },
+  { id: "overview", label: "Home" },
+  { id: "operations", label: "Operations" },
+  { id: "engineer", label: "Engineers" },
   { id: "finance", label: "Finance" },
   { id: "maintenance", label: "Maintenance" },
   { id: "safety", label: "Safety" },
-  { id: "operations", label: "Operations" },
 ];
 
 export function PlantShell({
@@ -36,7 +37,6 @@ export function PlantShell({
   mobileTab,
   onMobileTab,
   error,
-  liveFeedStrip,
 }: {
   mode: ShellMode;
   onModeChange: (m: ShellMode) => void;
@@ -52,30 +52,54 @@ export function PlantShell({
   mobileTab: "chat" | "visuals";
   onMobileTab: (t: "chat" | "visuals") => void;
   error?: string | null;
-  liveFeedStrip?: ReactNode;
 }) {
   return (
     <div className="shell-bg noise-bg flex min-h-screen flex-col bg-background text-foreground">
       <header className="glass-bar sticky top-0 z-30">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-3 lg:px-6">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-                <div className="h-3 w-3 rotate-45 rounded-sm bg-primary-foreground/80" />
-              </div>
-              <div>
-                <div className="text-[15px] font-semibold tracking-tight">
-                  Plant<span className="text-muted-foreground">OS</span>
-                  <span className="ml-0.5 text-primary">AI</span>
-                </div>
-                <p className="font-display text-[13px] leading-tight text-muted-foreground">
-                  One plant. One truth.
-                </p>
-              </div>
+        <div className="mx-auto flex max-w-[1600px] items-center gap-3 px-4 py-2.5 lg:px-6">
+          <div className="flex shrink-0 items-center gap-2.5">
+            <div className="plantos-cat-logo relative h-11 w-11 shrink-0 overflow-hidden rounded-xl border border-border/80 bg-white shadow-sm">
+              <Image
+                src="/plantos-cat.webp"
+                alt="PlantOS cat mascot"
+                width={44}
+                height={44}
+                priority
+                className="h-full w-full object-cover object-[50%_38%]"
+              />
+              <span className="plantos-eye-shine plantos-eye-left" aria-hidden="true" />
+              <span className="plantos-eye-shine plantos-eye-right" aria-hidden="true" />
+            </div>
+            <div className="text-xl font-bold tracking-[-0.035em]">
+              Plant<span className="text-foreground/60">OS</span>
+              <span className="ml-1 text-primary">AI</span>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+          <nav
+            className="flex min-w-0 flex-1 items-center justify-center gap-0.5 overflow-x-auto rounded-xl border border-border bg-surface p-1 shadow-sm"
+            aria-label="Primary dashboard views"
+          >
+            {SHELL_MODES.map((m) => {
+              const active = mode === m.id;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => onModeChange(m.id)}
+                  className={`shrink-0 rounded-lg px-2.5 py-2 text-xs font-semibold transition xl:px-3 xl:text-sm ${
+                    active
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-foreground/75 hover:bg-muted hover:text-foreground"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="flex shrink-0 items-center justify-end gap-1.5">
             <div
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold ${
                 feedActive
@@ -90,9 +114,8 @@ export function PlantShell({
               />
               {feedLabel}
             </div>
-            <p className="hidden text-[11px] text-muted-foreground md:block">{liveMeta}</p>
-            <div className="hidden items-center gap-1 sm:flex">{replayControls}</div>
-            <LovablePaletteControls />
+            <p className="hidden text-xs font-medium text-muted-foreground xl:block">{liveMeta}</p>
+            <div className="hidden items-center gap-1 lg:flex">{replayControls}</div>
             <button
               type="button"
               onClick={onOverflowToggle}
@@ -103,32 +126,9 @@ export function PlantShell({
             </button>
           </div>
         </div>
-
-        <div className="mx-auto max-w-[1600px] px-4 pb-3 lg:px-6">
-          <div className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-surface p-1">
-            {SHELL_MODES.map((m) => {
-              const active = mode === m.id;
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => onModeChange(m.id)}
-                  className={`shrink-0 rounded-lg px-3.5 py-2 text-sm transition ${
-                    active
-                      ? "bg-primary/10 font-medium text-primary"
-                      : "text-foreground/70 hover:bg-muted hover:text-foreground"
-                  }`}
-                >
-                  {m.label}
-                </button>
-              );
-            })}
-          </div>
-          <div className="mt-2 flex items-center gap-1 sm:hidden">{replayControls}</div>
-        </div>
       </header>
 
-      {liveFeedStrip}
+      <LovablePaletteControls showHeaderTrigger={false} />
 
       {overflowOpen && (
         <div className="border-b border-border bg-surface-2">
@@ -180,8 +180,7 @@ export function PlantShell({
         </div>
 
         <footer className="border-t border-border pt-3 text-[11px] text-muted-foreground">
-          One plant. One truth. Different intelligence for every role. · Read-only · Demo assumptions
-          labeled
+          Different intelligence for every role. · Read-only · Demo assumptions labeled
         </footer>
       </div>
     </div>

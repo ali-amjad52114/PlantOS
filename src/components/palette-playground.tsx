@@ -279,7 +279,11 @@ export function PalettePlayground({
  * Lovable mounts the playground at page root. Nesting fixed z-index under sticky
  * header (z-30) traps it below cards that use transform (.rise).
  */
-export function LovablePaletteControls() {
+export function LovablePaletteControls({
+  showHeaderTrigger = true,
+}: {
+  showHeaderTrigger?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [activePreset, setActivePreset] = useState(0);
   const [mounted, setMounted] = useState(false);
@@ -311,33 +315,33 @@ export function LovablePaletteControls() {
   const layer =
     mounted &&
     createPortal(
-      <>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="fixed bottom-6 right-6 z-[190] flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/30 transition hover:scale-105"
-        >
-          <Palette className="h-4 w-4" />
-          Theme
-        </button>
-        <PalettePlayground
-          open={open}
-          onClose={() => setOpen(false)}
-          activePreset={activePreset}
-          setActivePreset={setActivePreset}
-        />
-      </>,
+      <PalettePlayground
+        open={open}
+        onClose={() => setOpen(false)}
+        activePreset={activePreset}
+        setActivePreset={setActivePreset}
+      />,
       document.body
     );
 
   return (
     <>
+      {showHeaderTrigger && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm hover:bg-muted"
+        >
+          <Palette className="h-4 w-4" /> Palette
+        </button>
+      )}
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm hover:bg-muted"
+        className="fixed bottom-6 right-6 z-[190] flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/30 transition hover:scale-105"
       >
-        <Palette className="h-4 w-4" /> Palette
+        <Palette className="h-4 w-4" />
+        Theme
       </button>
       {layer}
     </>

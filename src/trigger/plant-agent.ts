@@ -1,8 +1,7 @@
 import { logger, metadata, prompts } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
-import { createOpenAI } from "@ai-sdk/openai";
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
-import { createProviderRegistry, stepCountIs, streamText, tool } from "ai";
+import { stepCountIs, streamText, tool } from "ai";
 import type { InferUITools, UIMessage } from "ai";
 import { z } from "zod";
 import { catalogPromptSection, normalizeSpec, validateSpec } from "../lib/catalog";
@@ -11,11 +10,12 @@ import { plantClientDataSchema } from "../lib/plant-chat-types";
 import { defaultPlantTower } from "../lib/plant-tower";
 import { engineerSnapshot, financeSnapshot, operationsSnapshot } from "../lib/plant-services";
 import { getReplayControl, tickReplay } from "../lib/replay";
-
-/** Dashboard env is named OPEN_AI (also accepts standard OPENAI_API_KEY). */
-const openai = createOpenAI({
-  apiKey: process.env.OPEN_AI || process.env.OPENAI_API_KEY,
-});
+import {
+  plantChatModel,
+  plantPromptModelId,
+  plantRegistry,
+  resolvePlantLlmProvider,
+} from "./llm";
 
 let clickhouse: ClickHouseClient | undefined;
 
@@ -230,12 +230,10 @@ export type PlantChatUIMessage = UIMessage<
   InferUITools<typeof allTools>
 >;
 
-const registry = createProviderRegistry({ openai });
-
 const systemPrompt = prompts.define({
   id: "plantos-orchestrator",
   description: "PlantOS role-aware plant intelligence orchestrator",
-  model: "openai:gpt-4.1-mini",
+  model: plantPromptModelId(),
   variables: z.object({
     componentReference: z.string(),
   }),
@@ -248,8 +246,9 @@ Role context:
 
 Presenting results:
 - Calling the role investigate tool **automatically streams a 4-card Lovable plant tower** into the chat (durable). Do not describe that tower as a markdown table.
+- The UI already renders a compact findings list from the tool output — do **not** restate tag values, ranges, or long explanations.
 - Optionally call renderVisualization **once** for an extra chart/table if the tower is not enough.
-- After tools, add at most a one-or-two-sentence takeaway. Never dump raw tag tables as markdown.
+- After tools, reply with **only** a short recommendation (1 sentence, or at most 3 tight bullets). No preamble ("I'll investigate…"), no paragraphs, no repeating numbers already shown in the findings UI.
 - Production and finance dollar figures are SYNTHETIC DEMO ASSUMPTIONS — say so briefly when discussing money.
 - Never invent tag values. If a tool fails, report the error.
 - Dataset: HAI normal-op (train1), production signal tag P4_ST_PO (steam turbine power MW).
@@ -343,12 +342,15 @@ export const plantAgent = chat
     },
     run: async ({ messages, tools: resolvedTools, signal, clientData }) => {
       const role = clientData?.role ?? "engineer";
-      metadata.set("role", role).set("phase", "run");
+      const provider = resolvePlantLlmProvider();
+      const model = plantChatModel();
+      metadata.set("role", role).set("phase", "run").set("llmProvider", provider);
+      logger.info("plantos-agent model", { provider, role });
       if (!messages?.length) {
         console.warn("plantos-agent: empty messages on run — skipping streamText");
         return streamText({
-          ...chat.toStreamTextOptions({ registry, tools: resolvedTools }),
-          model: openai("gpt-4.1-mini"),
+          ...chat.toStreamTextOptions({ registry: plantRegistry, tools: resolvedTools }),
+          model,
           messages: [{ role: "user", content: "(no user message yet)" }],
           tools: resolvedTools,
           stopWhen: stepCountIs(1),
@@ -356,8 +358,8 @@ export const plantAgent = chat
         });
       }
       return streamText({
-        ...chat.toStreamTextOptions({ registry, tools: resolvedTools }),
-        model: openai("gpt-4.1-mini"),
+        ...chat.toStreamTextOptions({ registry: plantRegistry, tools: resolvedTools }),
+        model,
         messages,
         tools: resolvedTools,
         stopWhen: stepCountIs(12),

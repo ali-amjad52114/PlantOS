@@ -1,4 +1,18 @@
+"use client";
+
 import type { ReactElement } from "react";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  Line as RechartsLine,
+  LineChart,
+  ResponsiveContainer,
+} from "recharts";
+import { useCardLive } from "./card-live-context";
+import { chartMargin, LovableAxes, LovableTooltip, useBoundSeries } from "./chart-chrome";
+import { REPLIT_DECK_SEEDS, type ReplitCardSeed } from "./replit-decks-data";
 
 export type ReplitVisualCard = {
   id: string;
@@ -15,45 +29,159 @@ export type ReplitVisualDeck = {
   cards: ReplitVisualCard[];
 };
 
-type Seed = { id: string; label: string; hint: string };
-
 const palette = ["#34d399", "#38bdf8", "#fb923c", "#a78bfa"];
-const values = [72, 88, 64, 93, 79, 57];
+
+const lineSeed = Array.from({ length: 28 }, (_, i) => ({
+  t: i,
+  v: 55 + Math.sin(i / 2.4) * 22 + Math.cos(i / 5) * 8 + i * 0.35,
+}));
+
+const barSeed = [
+  { t: "Boiler", v: 72 },
+  { t: "Turbine", v: 88 },
+  { t: "Gen", v: 64 },
+  { t: "Water", v: 93 },
+  { t: "Steam", v: 79 },
+  { t: "Hydro", v: 57 },
+];
 
 function Bars({ color = palette[0], horizontal = false }: { color?: string; horizontal?: boolean }) {
-  return (
-    <div className={horizontal ? "space-y-2 pt-2" : "flex h-full items-end gap-1.5 pt-3"}>
-      {values.map((v, i) =>
-        horizontal ? (
-          <div key={i} className="flex items-center gap-2">
-            <span className="w-12 text-[8px] uppercase text-muted-foreground">{["Boiler", "Turbine", "Gen", "Water", "Steam", "Hydro"][i]}</span>
-            <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/5"><div className="h-full rounded-full" style={{ width: `${v}%`, background: color }} /></div>
-            <span className="w-7 text-right font-mono text-[9px]">{v}%</span>
+  const bound = useBoundSeries(barSeed);
+  const data =
+    bound.items?.length
+      ? bound.items.slice(0, 6).map((it) => ({ t: it.label, v: Number(it.value) }))
+      : bound.live
+        ? bound.data.map((p, i) => ({ t: barSeed[i % barSeed.length]?.t ?? p.t, v: p.v }))
+        : barSeed;
+  const unit = bound.unit || (bound.items?.[0]?.unit ?? "%");
+
+  if (horizontal) {
+    const max = Math.max(...data.map((d) => Math.abs(d.v)), 1);
+    return (
+      <div className="space-y-2 pt-2">
+        {data.map((row, i) => (
+          <div key={`${row.t}-${i}`} className="flex items-center gap-2" title={`${row.t}: ${row.v}`}>
+            <span className="w-14 truncate text-[8px] uppercase text-muted-foreground">{row.t}</span>
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/5">
+              <div
+                className="h-full rounded-full"
+                style={{ width: `${Math.min(100, (Math.abs(row.v) / max) * 100)}%`, background: color }}
+              />
+            </div>
+            <span className="w-14 text-right font-mono text-[9px] tabular">
+              {row.v.toFixed(unit === "%" ? 0 : 2)}
+              {unit ? ` ${unit}` : ""}
+            </span>
           </div>
-        ) : (
-          <div key={i} className="flex-1 rounded-t-sm" style={{ height: `${v}%`, background: `linear-gradient(${color}, ${color}35)` }} />
-        )
-      )}
-    </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data} margin={chartMargin}>
+        <LovableAxes xKey="t" />
+        <LovableTooltip unit={unit} />
+        <Bar dataKey="v" name="Value" fill={color} radius={[4, 4, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
   );
 }
 
-function Line({ color = palette[1], second = false }: { color?: string; second?: boolean }) {
+function TrendLine({ color = palette[1], second = false }: { color?: string; second?: boolean }) {
+  const bound = useBoundSeries(lineSeed);
+  const data = bound.live
+    ? bound.data.map((p) => ({ t: p.t, primary: p.v }))
+    : lineSeed.map((p, i) => ({
+        t: p.t,
+        primary: p.v,
+        secondary: second ? 48 + Math.cos(i / 3) * 12 + i * 0.2 : undefined,
+      }));
+  const unit = bound.unit || "MW";
+
   return (
-    <svg viewBox="0 0 240 110" className="h-full w-full" role="img" aria-label="Seed trend preview">
-      {[20, 45, 70, 95].map((y) => <line key={y} x1="4" x2="236" y1={y} y2={y} stroke="currentColor" opacity=".08" />)}
-      <path d="M4 83 C28 76 38 45 62 55 S98 92 121 67 S158 27 181 42 S213 65 236 29" fill="none" stroke={color} strokeWidth="3" />
-      {second && <path d="M4 92 C31 80 49 75 72 77 S112 52 139 58 S184 44 236 49" fill="none" stroke={palette[2]} strokeWidth="2" strokeDasharray="5 4" />}
-    </svg>
+    <ResponsiveContainer width="100%" height="100%">
+      <LineChart data={data} margin={chartMargin}>
+        <LovableAxes />
+        <LovableTooltip unit={unit} />
+        <RechartsLine
+          type="monotone"
+          dataKey="primary"
+          name="Primary"
+          stroke={color}
+          strokeWidth={2.5}
+          dot={false}
+          activeDot={{ r: 4, strokeWidth: 0 }}
+        />
+        {!bound.live && second && (
+          <RechartsLine
+            type="monotone"
+            dataKey="secondary"
+            name="Secondary"
+            stroke={palette[2]}
+            strokeWidth={2}
+            strokeDasharray="5 4"
+            dot={false}
+          />
+        )}
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+function AreaTrend({ color = palette[0] }: { color?: string }) {
+  const bound = useBoundSeries(lineSeed);
+  const unit = bound.unit || "MW";
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart data={bound.data} margin={chartMargin}>
+        <defs>
+          <linearGradient id="replit-area" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.75} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <LovableAxes />
+        <LovableTooltip unit={unit} />
+        <Area
+          type="monotone"
+          dataKey="v"
+          name="Value"
+          stroke={color}
+          strokeWidth={2}
+          fill="url(#replit-area)"
+          activeDot={{ r: 4, strokeWidth: 0 }}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
   );
 }
 
 function Ring({ value = 78, color = palette[0] }: { value?: number; color?: string }) {
+  const bound = useCardLive();
+  const live =
+    bound && Number.isFinite(bound.primary)
+      ? bound.unit === "%"
+        ? Number(bound.primary)
+        : Math.min(100, Math.max(0, Number(bound.primary)))
+      : value;
+  const label = bound?.unit === "%" ? `${live.toFixed(0)}%` : bound ? `${Number(bound.primary).toFixed(1)}${bound.unit ? ` ${bound.unit}` : ""}` : `${live}%`;
   return (
     <div className="grid h-full place-items-center">
-      <div className="grid h-32 w-32 place-items-center rounded-full" style={{ background: `conic-gradient(${color} ${value * 3.6}deg, rgba(255,255,255,.06) 0)` }}>
+      <div
+        className="grid h-32 w-32 place-items-center rounded-full"
+        style={{
+          background: `conic-gradient(${color} ${Math.min(100, Math.max(0, live)) * 3.6}deg, rgba(255,255,255,.06) 0)`,
+        }}
+      >
         <div className="grid h-24 w-24 place-items-center rounded-full bg-[#111416] text-center shadow-inner">
-          <div><div className="text-2xl font-semibold">{value}%</div><div className="text-[8px] uppercase tracking-widest text-muted-foreground">within band</div></div>
+          <div>
+            <div className="font-mono text-xl font-semibold tabular">{label}</div>
+            <div className="text-[8px] uppercase tracking-widest text-muted-foreground">
+              {bound?.caption?.slice(0, 28) || "within band"}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -61,81 +189,276 @@ function Ring({ value = 78, color = palette[0] }: { value?: number; color?: stri
 }
 
 function Tank({ color = palette[1], level = 68 }: { color?: string; level?: number }) {
+  const bound = useCardLive();
+  const live = bound && Number.isFinite(bound.primary) ? Number(bound.primary) : level;
+  const pct =
+    bound?.unit === "%"
+      ? Math.min(100, Math.max(0, live))
+      : Math.min(100, Math.max(8, (Math.abs(live) % 100) || level));
   return (
     <div className="flex h-full items-center justify-center gap-5">
       <div className="relative h-36 w-24 overflow-hidden rounded-b-3xl rounded-t-lg border-2 border-white/15 bg-black/20">
-        <div className="absolute inset-x-0 bottom-0 transition-all" style={{ height: `${level}%`, background: `linear-gradient(180deg, ${color}80, ${color})` }} />
-        {[25, 50, 75].map((n) => <span key={n} className="absolute left-2 right-2 border-t border-dashed border-white/25" style={{ bottom: `${n}%` }} />)}
+        <div
+          className="absolute inset-x-0 bottom-0 transition-all"
+          style={{ height: `${pct}%`, background: `linear-gradient(180deg, ${color}80, ${color})` }}
+        />
+        {[25, 50, 75].map((n) => (
+          <span
+            key={n}
+            className="absolute left-2 right-2 border-t border-dashed border-white/25"
+            style={{ bottom: `${n}%` }}
+          />
+        ))}
       </div>
-      <div className="space-y-2 text-xs"><div className="text-3xl font-light">{level}<span className="text-sm text-muted-foreground">%</span></div><div className="font-mono text-[9px] text-muted-foreground">P1_LIT01 · RAW SCALE</div><span className="inline-flex rounded-full bg-emerald-400/10 px-2 py-1 text-[9px] text-emerald-300">NORMAL BAND</span></div>
+      <div className="space-y-2 text-xs">
+        <div className="font-mono text-3xl font-light tabular">
+          {live.toFixed(bound?.unit === "%" || !bound ? 0 : 2)}
+          <span className="text-sm text-muted-foreground">{bound?.unit ? ` ${bound.unit}` : "%"}</span>
+        </div>
+        <div className="font-mono text-[9px] text-muted-foreground">
+          {bound?.caption || "P1_LIT01 · RAW SCALE"}
+        </div>
+        <span className="inline-flex rounded-full bg-emerald-400/10 px-2 py-1 text-[9px] text-emerald-300">
+          {bound ? "LIVE BIND" : "NORMAL BAND"}
+        </span>
+      </div>
     </div>
   );
 }
 
 function Rotor() {
+  const bound = useCardLive();
+  const rpm = bound && Number.isFinite(bound.primary) ? Number(bound.primary) : 815;
   return (
     <div className="grid h-full place-items-center">
       <div className="relative grid h-32 w-32 place-items-center rounded-full border border-orange-300/25 bg-orange-400/5 shadow-[0_0_45px_rgba(251,146,60,.12)]">
-        {[0, 120, 240].map((r) => <div key={r} className="absolute h-2 w-24 origin-center rounded-full bg-gradient-to-r from-transparent via-orange-300/60 to-transparent" style={{ transform: `rotate(${r}deg)` }} />)}
-        <div className="z-10 grid h-16 w-16 place-items-center rounded-full border border-orange-300/40 bg-[#161412] text-center"><div><div className="text-lg">815</div><div className="text-[8px] text-orange-300">RPM</div></div></div>
+        {[0, 120, 240].map((r) => (
+          <div
+            key={r}
+            className="absolute h-2 w-24 origin-center rounded-full bg-gradient-to-r from-transparent via-orange-300/60 to-transparent"
+            style={{ transform: `rotate(${r}deg)` }}
+          />
+        ))}
+        <div className="z-10 grid h-16 w-16 place-items-center rounded-full border border-orange-300/40 bg-[#161412] text-center">
+          <div>
+            <div className="font-mono text-lg tabular">{rpm.toFixed(0)}</div>
+            <div className="text-[8px] text-orange-300">{bound?.unit || "RPM"}</div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
 function Heatmap() {
-  return <div className="grid h-full grid-cols-8 gap-1 p-2">{Array.from({ length: 48 }, (_, i) => <div key={i} className="rounded-sm" style={{ background: `color-mix(in srgb, ${palette[i % 4]} ${28 + ((i * 17) % 65)}%, #16181b)` }} />)}</div>;
+  const bound = useBoundSeries(lineSeed);
+  const cells = bound.live
+    ? bound.data.slice(0, 48).map((p) => p.v)
+    : Array.from({ length: 48 }, (_, i) => 28 + ((i * 17) % 65));
+  const max = Math.max(...cells.map(Math.abs), 1);
+  return (
+    <div className="grid h-full grid-cols-8 gap-1 p-2">
+      {cells.map((v, i) => (
+        <div
+          key={i}
+          title={`${bound.live ? bound.data[i]?.t ?? i : i}: ${Number(v).toFixed(2)}${bound.unit ? ` ${bound.unit}` : ""}`}
+          className="rounded-sm"
+          style={{
+            background: `color-mix(in srgb, ${palette[i % 4]} ${18 + (Math.abs(v) / max) * 70}%, #16181b)`,
+          }}
+        />
+      ))}
+    </div>
+  );
 }
 
 function Feed() {
-  return <div className="space-y-2 pt-2">{["Boiler pressure nearing watch band", "Steam demand changed", "Generator output below target", "Water loop stable"].map((x, i) => <div key={x} className="flex items-center gap-2 rounded-lg border border-white/7 bg-white/[.025] p-2"><span className="h-2 w-2 rounded-full" style={{ background: palette[(i + 2) % 4] }} /><span className="flex-1 text-[10px]">{x}</span><span className="font-mono text-[8px] text-muted-foreground">{i + 1}m</span></div>)}</div>;
+  const bound = useCardLive();
+  const rows = bound?.items?.length
+    ? bound.items.map((it) => ({
+        text: `${it.label}: ${it.value.toFixed(2)}${it.unit ? ` ${it.unit}` : ""}${
+          it.tone === "danger" ? " · out of band" : ""
+        }`,
+        tone: it.tone,
+      }))
+    : [
+        { text: "Boiler pressure nearing watch band", tone: undefined },
+        { text: "Steam demand changed", tone: undefined },
+        { text: "Generator output below target", tone: undefined },
+        { text: "Water loop stable", tone: undefined },
+      ];
+  return (
+    <div className="space-y-2 pt-2">
+      {rows.map((row, i) => (
+        <div
+          key={`${row.text}-${i}`}
+          className="flex items-center gap-2 rounded-lg border border-white/7 bg-white/[.025] p-2"
+        >
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{
+              background:
+                row.tone === "danger"
+                  ? "var(--danger)"
+                  : row.tone === "warning"
+                    ? "var(--warning)"
+                    : palette[(i + 2) % 4],
+            }}
+          />
+          <span className="min-w-0 flex-1 truncate text-[10px]">{row.text}</span>
+          <span className="font-mono text-[8px] text-muted-foreground">{bound ? "live" : `${i + 1}m`}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function Process() {
-  return <div className="flex h-full items-center justify-between gap-1">{["Demand", "Boiler", "Steam", "Turbine", "MW out"].map((x, i) => <div key={x} className="contents"><div className="grid h-20 flex-1 place-items-center rounded-xl border border-white/10 bg-white/[.035] text-center"><div><div className="text-lg" style={{ color: palette[i % 4] }}>{[92, 88, 84, 81, 79][i]}%</div><div className="text-[8px] uppercase text-muted-foreground">{x}</div></div></div>{i < 4 && <span className="text-muted-foreground">›</span>}</div>)}</div>;
+  const bound = useCardLive();
+  const stages = bound?.items?.length
+    ? bound.items.slice(0, 5).map((it, i) => ({
+        label: it.label,
+        value: Number(it.value),
+        unit: it.unit || "",
+        color: palette[i % 4],
+      }))
+    : ["Demand", "Boiler", "Steam", "Turbine", "MW out"].map((x, i) => ({
+        label: x,
+        value: [92, 88, 84, 81, 79][i],
+        unit: "%",
+        color: palette[i % 4],
+      }));
+  return (
+    <div className="flex h-full items-center justify-between gap-1">
+      {stages.map((stage, i) => (
+        <div key={stage.label} className="contents">
+          <div className="grid h-20 flex-1 place-items-center rounded-xl border border-white/10 bg-white/[.035] text-center">
+            <div>
+              <div className="font-mono text-lg tabular" style={{ color: stage.color }}>
+                {stage.value.toFixed(stage.unit === "%" ? 0 : 1)}
+                {stage.unit ? (stage.unit === "%" ? "%" : "") : ""}
+              </div>
+              <div className="truncate px-1 text-[8px] uppercase text-muted-foreground">{stage.label}</div>
+            </div>
+          </div>
+          {i < stages.length - 1 && <span className="text-muted-foreground">›</span>}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function DeviceStrip() {
-  return <div className="grid h-full grid-cols-2 gap-2">{["Boiler", "Turbine", "Generator", "Water"].map((x, i) => <div key={x} className="flex flex-col justify-between rounded-xl border border-white/10 bg-white/[.03] p-3"><div className="flex items-center justify-between"><span className="text-xs font-medium">{x}</span><span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" /></div><div className="text-2xl">{[0.97, 815, 279, 68][i]}<span className="ml-1 text-[9px] text-muted-foreground">{["bar", "rpm", "MW", "%"][i]}</span></div><div className="text-[8px] uppercase text-muted-foreground">Live seed · nominal</div></div>)}</div>;
+  const bound = useCardLive();
+  const cells = bound?.items?.length
+    ? bound.items.slice(0, 4).map((it) => ({
+        label: it.label,
+        value: Number(it.value),
+        unit: it.unit || "",
+        tone: it.tone,
+      }))
+    : [
+        { label: "Boiler", value: 0.97, unit: "bar", tone: undefined as string | undefined },
+        { label: "Turbine", value: 815, unit: "rpm", tone: undefined },
+        { label: "Generator", value: 279, unit: "MW", tone: undefined },
+        { label: "Water", value: 68, unit: "%", tone: undefined },
+      ];
+  return (
+    <div className="grid h-full grid-cols-2 gap-2">
+      {cells.map((cell) => (
+        <div
+          key={cell.label}
+          className="flex flex-col justify-between rounded-xl border border-white/10 bg-white/[.03] p-3"
+        >
+          <div className="flex items-center justify-between">
+            <span className="truncate text-xs font-medium">{cell.label}</span>
+            <span
+              className="h-2 w-2 rounded-full shadow-[0_0_8px_#34d399]"
+              style={{
+                background: cell.tone === "danger" ? "var(--danger)" : "#34d399",
+                boxShadow: cell.tone === "danger" ? "0 0 8px var(--danger)" : undefined,
+              }}
+            />
+          </div>
+          <div className="font-mono text-2xl tabular">
+            {cell.value.toFixed(cell.unit === "rpm" || cell.unit === "%" ? 0 : 2)}
+            <span className="ml-1 text-[9px] text-muted-foreground">{cell.unit}</span>
+          </div>
+          <div className="text-[8px] uppercase text-muted-foreground">
+            {bound ? "Live bind" : "Live seed · nominal"}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function Finance() {
-  return <div className="grid h-full grid-cols-2 gap-3"><div className="flex flex-col justify-between rounded-xl bg-emerald-400/10 p-4"><span className="text-[9px] uppercase text-emerald-300">Synthetic demo</span><strong className="text-3xl">$68<span className="text-sm font-normal">/MWh</span></strong><span className="text-[9px] text-muted-foreground">Illustrative cost assumption</span></div><div className="flex flex-col justify-between rounded-xl border border-white/10 p-3"><Line color={palette[0]} /><span className="text-[8px] uppercase text-muted-foreground">Margin proxy trend</span></div></div>;
+  const bound = useCardLive();
+  const cost =
+    bound?.items?.find((i) => /cost\s*\/\s*mwh|cost per/i.test(i.label))?.value ??
+    (bound?.unit === "USD" && Number.isFinite(bound.primary) ? Number(bound.primary) : 68);
+  const { data } = useBoundSeries(lineSeed);
+  return (
+    <div className="grid h-full grid-cols-2 gap-3">
+      <div className="flex flex-col justify-between rounded-xl bg-emerald-400/10 p-4">
+        <span className="text-[9px] uppercase text-emerald-300">
+          {bound?.synthetic ? "Synthetic demo" : bound ? "Live bind" : "Synthetic demo"}
+        </span>
+        <strong className="font-mono text-3xl tabular">
+          ${Number(cost).toFixed(0)}
+          <span className="text-sm font-normal">/MWh</span>
+        </strong>
+        <span className="text-[9px] text-muted-foreground">
+          {bound?.caption?.slice(0, 40) || "Illustrative cost assumption"}
+        </span>
+      </div>
+      <div className="flex min-h-0 flex-col justify-between rounded-xl border border-white/10 p-2">
+        <div className="min-h-0 flex-1">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+              <LovableAxes />
+              <LovableTooltip unit={bound?.unit || "USD"} />
+              <Area type="monotone" dataKey="v" name="Margin" stroke={palette[0]} fill={palette[0]} fillOpacity={0.25} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+        <span className="text-[8px] uppercase text-muted-foreground">Margin proxy trend</span>
+      </div>
+    </div>
+  );
 }
 
 function renderVisual(type: string) {
   if (/Tank|Level/.test(type)) return <Tank />;
-  if (/Rotor|Gauge|Speedometer|Donut|Ring/.test(type)) return /Rotor/.test(type) ? <Rotor /> : <Ring value={type.length % 2 ? 84 : 76} color={palette[type.length % 4]} />;
+  if (/Rotor|Gauge|Speedometer|Donut|Ring/.test(type))
+    return /Rotor/.test(type) ? (
+      <Rotor />
+    ) : (
+      <Ring value={type.length % 2 ? 84 : 76} color={palette[type.length % 4]} />
+    );
   if (/Heat|Matrix|Thermal|Spectrum/.test(type)) return <Heatmap />;
   if (/Feed|Attention/.test(type)) return <Feed />;
   if (/Process|Funnel|Pipeline/.test(type)) return <Process />;
   if (/Device|AreaHealth|Reliability|Scorecard|State|Range/.test(type)) return <DeviceStrip />;
   if (/Cost|Finance|Margin|Value/.test(type)) return <Finance />;
-  if (/Trend|Chart|Timeline|Throughput|Output|Power|Energy|Vib/.test(type)) return <Line second />;
+  if (/Timeline|Throughput|Output|Power|Energy/.test(type))
+    return <AreaTrend color={palette[type.length % 4]} />;
+  if (/Trend|Chart|Vib/.test(type)) return <TrendLine second color={palette[type.length % 4]} />;
   return <Bars horizontal={type.length % 2 === 0} color={palette[type.length % 4]} />;
 }
 
-function cards(seeds: Seed[]): ReplitVisualCard[] {
-  return seeds.map((seed, i) => ({ ...seed, bg: `radial-gradient(circle at ${75 - (i % 3) * 20}% 10%, ${palette[i % 4]}18, transparent 48%), #111315`, render: () => renderVisual(seed.id) }));
+function cards(seeds: ReplitCardSeed[]): ReplitVisualCard[] {
+  return seeds.map((seed, i) => ({
+    ...seed,
+    bg: `radial-gradient(circle at ${75 - (i % 3) * 20}% 10%, ${palette[i % 4]}18, transparent 48%), #111315`,
+    render: () => renderVisual(seed.id),
+  }));
 }
 
-const deck = (name: string, tag: string, roleHint: ReplitVisualDeck["roleHint"], seeds: Seed[]): ReplitVisualDeck => ({ name, tag, roleHint, cards: cards(seeds) });
-const s = (id: string, label: string, hint: string): Seed => ({ id, label, hint });
-
-export const REPLIT_DECKS: ReplitVisualDeck[] = [
-  deck("Boiler equipment", "REPLIT · EQUIPMENT", "engineer", [s("BoilerPressureFace", "Boiler pressure face", "P1_PIT01 · operating band"), s("BoilerThermalFace", "Boiler thermal face", "P1_TIT01/02 · raw trend"), s("BoilerLevelTank", "Boiler level tank", "P1_LIT01 · raw scale"), s("BoilerValvesFlow", "Boiler valves & flow", "P1_FCV03Z · P1_FT01")]),
-  deck("Turbine equipment", "REPLIT · EQUIPMENT", "engineer", [s("TurbineRotorFace", "Turbine rotor face", "P2_SIT01 · rpm"), s("TurbineVibSpectrumFace", "Turbine vibration spectrum", "P2_VT* · seeded bins"), s("TurbineVibTrend", "Turbine vibration trend", "P2_VT01e · recent window"), s("TurbineState", "Turbine state", "P2_On · P2_Auto")]),
-  deck("Steam generator", "REPLIT · EQUIPMENT", "engineer", [s("GeneratorOutputFace", "Generator output face", "P4_ST_PO · MW"), s("GeneratorLoadFace", "Generator load face", "P4_ST_LD · demand"), s("SteamCondition", "Steam condition", "P4_ST_PT01 · P4_ST_TT01 raw"), s("SteamFeedTrend", "Steam feed trend", "P4_ST_FD · recent window")]),
-  deck("Hydro equipment", "REPLIT · EQUIPMENT", "engineer", [s("HydroPowerFace", "Hydro power face", "P4_HT_PO · MW"), s("HydroGaugeFace", "Hydro contribution gauge", "Hydro share of generation"), s("HydroTrend", "Hydro power trend", "P4_HT_PO · recent window"), s("HydroVsSteamFace", "Hydro vs steam", "P4_HT_PO · P4_ST_PO")]),
-  deck("Water treatment", "REPLIT · EQUIPMENT", "engineer", [s("WaterLevelTank", "Water level tank", "P3_LIT01 · raw scale"), s("WaterLimits", "Water operating limits", "P3_LIT01 · band position"), s("WaterValve", "Water valve face", "P3_LCV01D · demand"), s("WaterLevelTrend", "Water level trend", "P3_LIT01 · recent window")]),
-  deck("Ops set 1", "REPLIT · OPS", "operations", [s("AreaHealthArcs", "Area health arcs", "Boiler · turbine · gen · water"), s("ThroughputTimelineOps", "Generation hero timeline", "Shift MWh · actual vs target"), s("QualityRingsOps", "Attention-rate rings", "Normal vs attention share"), s("AttentionFeed", "Plant attention feed", "Prioritized area findings"), s("ShiftBarsOps", "Shift energy bars", "Actual vs planned MWh"), s("OeeSpeedometer", "Plant effectiveness", "Availability · output · cadence")]),
-  deck("Ops set 2", "REPLIT · OPS", "operations", [s("ProcessFunnelOps", "Plant process pipeline", "Demand → steam → turbine → MW"), s("HourlyEnergyBars", "Hourly energy bars", "MWh by hour"), s("StageEfficiency", "Stage efficiency", "Conversion across plant stages"), s("AttentionPareto", "Attention by area", "Pause/watch reasons"), s("YieldTrend", "Target attainment trend", "Delivered vs planned energy"), s("CadenceGauges", "Tag cadence gauges", "Sample interval health")]),
-  deck("Ops set 3", "REPLIT · OPS", "operations", [s("ThermalHeatmapOps", "Thermal heatmap", "Raw temperature signal field"), s("VibChartOps", "Vibration chart", "P2_VT* trend"), s("AreaReliability", "Area reliability", "Four-area status"), s("FaultRadar", "Attention radar", "Signal families under watch"), s("OutageWindows", "Pause windows", "Replay and attention intervals"), s("EnergyUsageBars", "Auxiliary energy bars", "Demo plant energy proxy")]),
-  deck("Ops set 4", "REPLIT · OPS", "operations", [s("YieldDonut", "Target attainment donut", "Shift MWh completion"), s("CostPerMwhDemo", "Demo cost per MWh", "Synthetic assumptions"), s("AreaVsTargetBullets", "Area vs target", "Contribution bullets"), s("WasteAttentionTrend", "Attention trend", "Off-normal share over time"), s("ShiftScorecard", "Shift scorecard", "Output · cadence · attention"), s("OutputHeatMatrix", "Output heat matrix", "MWh intensity by interval")]),
-  deck("Generation rotor I", "REPLIT · GENERATION", "engineer", [s("RotorFaceplate", "Rotating machine faceplate", "P2_SIT01 · RUN/AUTO"), s("GenPowerChart", "Generation power chart", "Steam and hydro MW"), s("BearingTemp", "Bearing temperature", "Seeded engineering preview"), s("AmbientTemp", "Ambient temperature", "Seeded engineering preview")]),
-  deck("Generation rotor II", "REPLIT · GENERATION", "engineer", [s("RotorTemp", "Rotor temperature", "Seeded engineering preview"), s("StatorTemp", "Stator temperature", "P4_ST_TT01 · raw scale"), s("EnergyStat", "Shift energy", "MWh from generation"), s("TargetGauge", "Generation target gauge", "Shift attainment")]),
-  deck("Role response I", "REPLIT · RESPONSES", "engineer", [s("EngineerFinding", "Engineer key finding", "Evidence-led attention summary"), s("DeviceStrip", "Plant device strip", "Four-area live status"), s("RangeBars", "Operating range bars", "Current position vs band"), s("IdleGenStrip", "Idle plant status", "Question-ready live overview")]),
-  deck("Role response II", "REPLIT · RESPONSES", "operations", [s("OpsShiftDonut", "Operations shift donut", "MWh completion"), s("RateChart", "Generation rate chart", "Actual vs target MW"), s("AreaUtil", "Area utilization", "Boiler · turbine · gen · water")]),
-  deck("Role response III", "REPLIT · RESPONSES", "finance", [s("FinanceValueHero", "Demo value hero", "Synthetic shift value"), s("CostMix", "Demo cost mix", "Energy · labor · fixed assumptions"), s("MarginTrend", "Demo margin trend", "Synthetic projection")]),
-];
-
+export const REPLIT_DECKS: ReplitVisualDeck[] = REPLIT_DECK_SEEDS.map((d) => ({
+  name: d.name,
+  tag: d.tag,
+  roleHint: d.roleHint,
+  cards: cards(d.cards),
+}));

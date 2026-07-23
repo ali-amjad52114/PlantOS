@@ -1,14 +1,10 @@
-import { createOpenAI } from "@ai-sdk/openai";
 import { logger, metadata, task } from "@trigger.dev/sdk";
 import { generateObject } from "ai";
 import { z } from "zod";
+import { hasPlantLlmKey, plantChatModel, resolvePlantLlmProvider } from "./llm";
 import { plantInvestigate } from "./plant-investigate";
 
 type Role = "engineer" | "operations" | "finance";
-
-const openai = createOpenAI({
-  apiKey: process.env.OPEN_AI || process.env.OPENAI_API_KEY,
-});
 
 const routingSchema = z.object({
   role: z.enum(["engineer", "operations", "finance"]),
@@ -54,12 +50,13 @@ async function routeQuestion(question: string): Promise<{
   reason: string;
   method: "llm" | "keywords";
 }> {
-  const hasKey = Boolean(process.env.OPEN_AI || process.env.OPENAI_API_KEY);
-  if (!hasKey) return routeByKeywords(question);
+  if (!hasPlantLlmKey()) return routeByKeywords(question);
 
   try {
+    const provider = resolvePlantLlmProvider();
+    logger.info("Routing with LLM", { provider });
     const { object } = await generateObject({
-      model: openai("gpt-4.1-mini"),
+      model: plantChatModel(),
       schema: routingSchema,
       temperature: 0.1,
       prompt: `You are a PlantOS traffic controller. Route the user question to exactly one role.

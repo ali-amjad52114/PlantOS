@@ -8,7 +8,10 @@ import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { mintChatAccessToken, startChatSession } from "@/app/actions";
+import { PinableVisual } from "@/components/canvas-pin-board";
 import { FinanceBars, SparkTrend, TargetBars } from "@/components/charts";
+import { FindingsBody } from "@/components/plant-chat-findings";
+import { LovableCardView } from "@/components/lovable-viz/LovableCardView";
 import { PlantTowerGrid } from "@/components/plant-tower-grid";
 import { Visualization } from "@/components/visualization";
 import {
@@ -20,6 +23,7 @@ import {
   upsertChatSession,
   type StoredChat,
 } from "@/lib/chat-sessions";
+import { cardDraftFromTower, type CanvasPinDraft } from "@/lib/canvas-pins";
 import { normalizeSpec } from "@/lib/catalog";
 import type { PlantTowerPayload } from "@/lib/plant-tower";
 import type { plantAgent } from "@/trigger/plant-agent";
@@ -54,6 +58,8 @@ export function PlantChat({
   onStreamProgress,
   onAgentBusyChange,
   onAgentError,
+  onPinVisual,
+  fixtureTower = null,
 }: {
   role: Role;
   /** Persona this chat pane belongs to — sessions are filtered by this. */
@@ -73,17 +79,49 @@ export function PlantChat({
   onStreamProgress?: (progress: PopulateProgress | null) => void;
   onAgentBusyChange?: (busy: boolean, chatMode: string) => void;
   onAgentError?: (message: string, chatMode: string) => void;
+  /** Pin a chat visual onto the right canvas (PLAN_CHAT_CANVAS_PINS). */
+  onPinVisual?: (draft: CanvasPinDraft) => void;
+  /** E2E / demo: pinable tower without waiting on the agent. */
+  fixtureTower?: PlantTowerPayload | null;
 }) {
   const [sessions, setSessions] = useState<StoredChat[]>([]);
   const [chatId, setChatId] = useState(() => newChatId());
   const [hydrated, setHydrated] = useState(false);
+  /** Fresh Trigger chatId reserved for the current shell ask (null until rotated). */
+  const [pendingChatId, setPendingChatId] = useState<string | null>(null);
+  const rotatedForPending = useRef<string | null>(null);
 
   useEffect(() => {
     const resolved = resolveChatIdForMode(mode);
     setSessions(resolved.sessions);
     setChatId(resolved.chatId);
     setHydrated(true);
+    rotatedForPending.current = null;
+    setPendingChatId(null);
   }, [mode]);
+
+  useEffect(() => {
+    if (!hydrated || !pendingQuestion) {
+      if (!pendingQuestion) {
+        rotatedForPending.current = null;
+        setPendingChatId(null);
+      }
+      return;
+    }
+    if (rotatedForPending.current === pendingQuestion) return;
+    rotatedForPending.current = pendingQuestion;
+    const id = newChatId();
+    upsertChatSession({
+      id,
+      title: pendingQuestion.slice(0, 72),
+      mode,
+      role,
+      updatedAt: Date.now(),
+    });
+    setSessions(sessionsForMode(mode));
+    setPendingChatId(id);
+    setChatId(id);
+  }, [hydrated, pendingQuestion, mode, role]);
 
   function selectChat(id: string) {
     setActiveChatId(mode, id);
@@ -103,6 +141,10 @@ export function PlantChat({
     );
   }
 
+  // Hold the question until the new chatId is mounted — never submit on a poisoned prior session.
+  const readyPending =
+    pendingQuestion && pendingChatId && chatId === pendingChatId ? pendingQuestion : null;
+
   return (
     <ChatSession
       key={`${mode}:${chatId}`}
@@ -118,13 +160,15 @@ export function PlantChat({
       shell={shell}
       suggestedQuestions={suggestedQuestions}
       populateProgress={populateProgress}
-      pendingQuestion={pendingQuestion}
+      pendingQuestion={readyPending}
       onPendingQuestionConsumed={onPendingQuestionConsumed}
       askBridgeRef={askBridgeRef}
       onStarterQuestion={onStarterQuestion}
       onStreamProgress={onStreamProgress}
       onAgentBusyChange={onAgentBusyChange}
       onAgentError={onAgentError}
+      onPinVisual={onPinVisual}
+      fixtureTower={fixtureTower}
     />
   );
 }
@@ -149,6 +193,8 @@ function ChatSession({
   onStreamProgress,
   onAgentBusyChange,
   onAgentError,
+  onPinVisual,
+  fixtureTower,
 }: {
   chatId: string;
   role: Role;
@@ -169,6 +215,8 @@ function ChatSession({
   onStreamProgress?: (progress: PopulateProgress | null) => void;
   onAgentBusyChange?: (busy: boolean, chatMode: string) => void;
   onAgentError?: (message: string, chatMode: string) => void;
+  onPinVisual?: (draft: CanvasPinDraft) => void;
+  fixtureTower?: PlantTowerPayload | null;
 }) {
   const transport = useTriggerChatTransport<typeof plantAgent>({
     task: "plantos-agent",
@@ -391,12 +439,34 @@ function ChatSession({
           {streamProgress && <ChatProgressBar progress={streamProgress} tone="ask" />}
 
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 text-sm">
+            {fixtureTower && onPinVisual && (
+              <div className="space-y-2" data-testid="canvas-fixture-source">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Fixture cards · pin individually
+                </p>
+                {fixtureTower.cards.map((card) => (
+                  <PinableVisual
+                    key={card.type}
+                    testId={`canvas-fixture-card-${card.type}`}
+                    draft={cardDraftFromTower(fixtureTower, card)}
+                    onPin={onPinVisual}
+                  >
+                    <LovableCardView
+                      type={card.type}
+                      label={card.label}
+                      hint={card.hint}
+                      binding={card.binding}
+                      compact
+                    />
+                  </PinableVisual>
+                ))}
+              </div>
+            )}
             {messages.length === 0 && (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
                   {mode[0].toUpperCase() + mode.slice(1)} chats only. Pick a starter to populate this
-                  persona&apos;s stage — switching tabs restores prior visuals if this persona already
-                  answered.
+                  persona&apos;s stage — pin visuals from chat onto the canvas on the right.
                 </p>
                 <div className="grid gap-2">
                   {suggestedQuestions.map((q, i) => (
@@ -417,14 +487,19 @@ function ChatSession({
               </div>
             )}
             {messages.map((m) => (
-              <Message key={m.id} message={m} hideTowers={hideTowersInChat} />
+              <Message
+                key={m.id}
+                message={m}
+                hideTowers={hideTowersInChat}
+                onPinVisual={onPinVisual}
+              />
             ))}
             {error && (
               <p className="rounded-lg border border-[color:var(--danger)]/30 bg-[color:var(--danger)]/10 px-3 py-2 text-xs text-[color:var(--danger)]">
                 {/quota|insufficient_quota|billing/i.test(error.message)
-                  ? "OpenAI quota exceeded — add billing credits or set OPEN_AI in Trigger.dev. Plant cards still load from ClickHouse."
+                  ? "OpenAI quota was exceeded on an earlier run — credits are OK now; click New chat and ask again. Cards still load from ClickHouse."
                   : /an error occurred/i.test(error.message)
-                    ? "Trigger chat session failed to start. Click Stop, then ask again. Cards still load from ClickHouse."
+                    ? "Prior chat session stuck after an OpenAI failure. Click New chat (or ask again — we open a fresh session). Cards still load from ClickHouse."
                     : `Agent error: ${error.message}`}
               </p>
             )}
@@ -648,11 +723,23 @@ function deriveAgentStreamProgress(
   return { percentage, label, steps };
 }
 
-function Message({ message, hideTowers }: { message: UIMessage; hideTowers?: boolean }) {
+function isToolPart(type: string) {
+  return type.startsWith("tool-");
+}
+
+function Message({
+  message,
+  hideTowers,
+  onPinVisual,
+}: {
+  message: UIMessage;
+  hideTowers?: boolean;
+  onPinVisual?: (draft: CanvasPinDraft) => void;
+}) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl bg-primary px-3 py-2 text-sm text-primary-foreground">
+        <div className="max-w-[85%] rounded-2xl bg-primary px-3 py-2 text-[13px] leading-snug text-primary-foreground">
           {message.parts.map((part, i) =>
             part.type === "text" ? <span key={i}>{part.text}</span> : null
           )}
@@ -663,31 +750,83 @@ function Message({ message, hideTowers }: { message: UIMessage; hideTowers?: boo
 
   let lastVizIndex = -1;
   let lastTowerIndex = -1;
+  let lastToolIndex = -1;
   message.parts.forEach((p, i) => {
     if (p.type === "tool-renderVisualization") lastVizIndex = i;
     if (p.type === "data-plant-tower") lastTowerIndex = i;
+    if (isToolPart(p.type)) lastToolIndex = i;
   });
 
   return (
-    <div className="space-y-1 text-sm text-foreground/90">
+    <div className="space-y-2 text-sm text-foreground/90">
       {message.parts.map((part, i) => {
         if (part.type === "tool-renderVisualization" && i !== lastVizIndex) return null;
         if (part.type === "data-plant-tower") {
           if (hideTowers || i !== lastTowerIndex) return null;
         }
         if (part.type === "data-investigation-step") return null;
+        // Drop "I'll investigate…" preamble — keep only the takeaway after tools.
+        if (part.type === "text" && lastToolIndex >= 0 && i < lastToolIndex) return null;
         const key = (part as any).toolCallId ?? `${part.type}-${i}`;
-        return <MessagePart key={key} part={part} />;
+        return (
+          <MessagePart
+            key={key}
+            part={part}
+            messageId={message.id}
+            onPinVisual={onPinVisual}
+          />
+        );
       })}
     </div>
   );
 }
 
-function MessagePart({ part }: { part: UIMessage["parts"][number] }) {
+function MessagePart({
+  part,
+  messageId,
+  onPinVisual,
+}: {
+  part: UIMessage["parts"][number];
+  messageId: string;
+  onPinVisual?: (draft: CanvasPinDraft) => void;
+}) {
   if (part.type === "text") {
+    const text = String(part.text || "").trim();
+    if (!text) return null;
     return (
-      <div className="prose-sm max-w-none text-foreground/85">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
+      <div className="chat-md max-w-none rounded-xl border border-border/70 bg-surface-2/50 px-3 py-2.5 text-[13px] leading-relaxed text-foreground/90">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+            ul: ({ children }) => <ul className="my-1.5 list-disc space-y-1 pl-4">{children}</ul>,
+            ol: ({ children }) => <ol className="my-1.5 list-decimal space-y-1 pl-4">{children}</ol>,
+            li: ({ children }) => <li className="leading-snug">{children}</li>,
+            strong: ({ children }) => (
+              <strong className="font-semibold text-foreground">{children}</strong>
+            ),
+            h1: ({ children }) => (
+              <h3 className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">
+                {children}
+              </h3>
+            ),
+            h2: ({ children }) => (
+              <h3 className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">
+                {children}
+              </h3>
+            ),
+            h3: ({ children }) => (
+              <h3 className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">
+                {children}
+              </h3>
+            ),
+            code: ({ children }) => (
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{children}</code>
+            ),
+          }}
+        >
+          {text}
+        </ReactMarkdown>
       </div>
     );
   }
@@ -695,7 +834,29 @@ function MessagePart({ part }: { part: UIMessage["parts"][number] }) {
   if (part.type === "data-plant-tower") {
     const tower = (part as { data?: PlantTowerPayload }).data;
     if (!tower?.cards?.length) return null;
-    return <PlantTowerGrid tower={tower} />;
+    if (!onPinVisual) return <PlantTowerGrid tower={tower} />;
+    return (
+      <div className="space-y-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Lovable Visual {tower.deck} · {tower.deckName} — pin each chart
+        </p>
+        {tower.cards.map((card) => (
+          <PinableVisual
+            key={card.type}
+            draft={cardDraftFromTower(tower, card, messageId)}
+            onPin={onPinVisual}
+          >
+            <LovableCardView
+              type={card.type}
+              label={card.label}
+              hint={card.hint}
+              binding={card.binding}
+              compact
+            />
+          </PinableVisual>
+        ))}
+      </div>
+    );
   }
 
   if (part.type === "tool-renderVisualization") {
@@ -705,25 +866,53 @@ function MessagePart({ part }: { part: UIMessage["parts"][number] }) {
     const spec = p.state === "input-streaming" ? null : normalizeSpec(input?.spec);
     if (!spec) return null;
     if (output && output.ok === false) return null;
-    return <Visualization spec={spec} />;
+    const draft: CanvasPinDraft = {
+      kind: "viz",
+      sourceMessageId: messageId,
+      payload: { kind: "viz", spec },
+    };
+    if (!onPinVisual) return <Visualization spec={spec} />;
+    return (
+      <PinableVisual draft={draft} onPin={onPinVisual}>
+        <Visualization spec={spec} />
+      </PinableVisual>
+    );
   }
 
   if (part.type === "tool-investigateEngineer") {
     return (
-      <ToolStatus label="Engineer investigation" spinning={(part as any).state !== "output-available"} />
+      <InvestigateBlock
+        label="Engineer"
+        spinning={(part as any).state !== "output-available"}
+        output={(part as any).output}
+        kind="engineer"
+        messageId={messageId}
+        onPinVisual={onPinVisual}
+      />
     );
   }
   if (part.type === "tool-investigateOperations") {
     return (
-      <ToolStatus
-        label="Operations investigation"
+      <InvestigateBlock
+        label="Operations"
         spinning={(part as any).state !== "output-available"}
+        output={(part as any).output}
+        kind="operations"
+        messageId={messageId}
+        onPinVisual={onPinVisual}
       />
     );
   }
   if (part.type === "tool-investigateFinance") {
     return (
-      <ToolStatus label="Finance investigation" spinning={(part as any).state !== "output-available"} />
+      <InvestigateBlock
+        label="Finance"
+        spinning={(part as any).state !== "output-available"}
+        output={(part as any).output}
+        kind="finance"
+        messageId={messageId}
+        onPinVisual={onPinVisual}
+      />
     );
   }
   if (part.type === "tool-getLivePlantStatus") {
@@ -736,6 +925,102 @@ function MessagePart({ part }: { part: UIMessage["parts"][number] }) {
   }
 
   return null;
+}
+
+function InvestigateBlock({
+  label,
+  spinning,
+  output,
+  kind,
+  messageId,
+  onPinVisual,
+}: {
+  label: string;
+  spinning?: boolean;
+  output?: any;
+  kind: "engineer" | "operations" | "finance";
+  messageId?: string;
+  onPinVisual?: (draft: CanvasPinDraft) => void;
+}) {
+  if (spinning || !output) {
+    return (
+      <div className="overflow-hidden rounded-xl border border-border/80 bg-surface">
+        <div className="flex items-center gap-1.5 border-b border-border/60 bg-surface-2/60 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {spinning ? <Loader2 className="size-3 animate-spin" /> : <span className="text-primary">✓</span>}
+          {label} findings
+        </div>
+        {spinning ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">Querying ClickHouse…</p>
+        ) : (
+          <FindingsBody kind={kind} data={output} />
+        )}
+      </div>
+    );
+  }
+
+  if (kind === "engineer" && Array.isArray(output.attention) && onPinVisual) {
+    return (
+      <div className="space-y-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {label} findings — pin each tag
+        </p>
+        {output.attention.slice(0, 5).map((a: any) => {
+          const draft: CanvasPinDraft = {
+            kind: "finding",
+            sourceMessageId: messageId,
+            payload: {
+              kind: "finding",
+              item: {
+                tag: String(a.tag),
+                label: String(a.label ?? a.tag),
+                value: Number(a.value),
+                unit: a.unit,
+                normalMin: a.normalMin,
+                normalMax: a.normalMax,
+                outside: Boolean(a.outside),
+              },
+            },
+          };
+          return (
+            <PinableVisual key={a.tag} draft={draft} onPin={onPinVisual}>
+              <div className="rounded-lg border border-border/60 bg-surface px-3 py-2">
+                <code className="font-mono text-[11px] font-semibold">{a.tag}</code>
+                <p className="text-[11px] text-muted-foreground">{a.label}</p>
+                <p className="mt-1 tabular text-sm">
+                  {Number(a.value).toFixed(2)} {a.unit || ""}
+                  {a.outside ? " · watch" : ""}
+                </p>
+              </div>
+            </PinableVisual>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Ops / finance: keep compact strip, still one pinable unit (metrics strip)
+  const body = (
+    <div className="overflow-hidden rounded-xl border border-border/80 bg-surface">
+      <div className="flex items-center gap-1.5 border-b border-border/60 bg-surface-2/60 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="text-primary">✓</span>
+        {label} findings
+      </div>
+      <FindingsBody kind={kind} data={output} />
+    </div>
+  );
+  if (!onPinVisual) return body;
+  return (
+    <PinableVisual
+      draft={{
+        kind: "findings",
+        sourceMessageId: messageId,
+        payload: { kind: "findings", findings: { label, kind, data: output } },
+      }}
+      onPin={onPinVisual}
+    >
+      {body}
+    </PinableVisual>
+  );
 }
 
 function ToolStatus({ label, spinning }: { label: string; spinning?: boolean }) {

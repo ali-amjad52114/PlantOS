@@ -1,4 +1,5 @@
 import type { CardBinding } from "@/lib/plant-tower";
+import { formatAxisTime } from "@/lib/axis-time";
 
 type EngSnap = {
   productionMW?: number | null;
@@ -57,7 +58,7 @@ function seriesFrom(
   rows: Array<{ ts?: string; value?: number }> | undefined
 ): Array<{ t: string; v: number }> {
   return (rows || []).slice(-60).map((r) => ({
-    t: String(r.ts ?? "").slice(11, 19),
+    t: formatAxisTime(r.ts),
     v: Number(r.value),
   }));
 }

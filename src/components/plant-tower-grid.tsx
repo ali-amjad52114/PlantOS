@@ -9,9 +9,6 @@ export function PlantTowerGrid({ tower }: { tower: PlantTowerPayload }) {
     <div className="my-2 space-y-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
-            Lovable Visual {tower.deck}
-          </p>
           <p className="text-sm font-semibold text-foreground">
             {tower.deckName}
             {tower.mode ? ` · ${tower.mode}` : ` · ${tower.role}`}

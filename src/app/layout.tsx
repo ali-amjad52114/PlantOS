@@ -22,7 +22,7 @@ const instrument = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "PlantOS — One plant. One truth.",
+  title: "PlantOS AI",
   description: "HAI normal-op plant intelligence via ClickHouse and Trigger.dev chat.agent",
 };
 

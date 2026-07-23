@@ -250,3 +250,63 @@ body {
 .spin-slow {
   animation: spin-slow 14s linear infinite;
 }
+
+@keyframes plantos-cat-idle {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  45% {
+    transform: translateY(-2px) rotate(-1deg);
+  }
+  55% {
+    transform: translateY(-2px) rotate(1deg);
+  }
+}
+
+@keyframes plantos-eye-glint {
+  0%,
+  70%,
+  86%,
+  100% {
+    opacity: 0;
+    transform: translate(-2px, 2px) scale(0.6);
+  }
+  77% {
+    opacity: 1;
+    transform: translate(2px, -2px) scale(1.25);
+  }
+}
+
+.plantos-cat-logo {
+  animation: plantos-cat-idle 5s ease-in-out infinite;
+}
+
+.plantos-eye-shine {
+  position: absolute;
+  top: 12px;
+  width: 4px;
+  height: 4px;
+  pointer-events: none;
+  border-radius: 999px;
+  background: white;
+  box-shadow: 0 0 7px 2px rgb(255 255 255 / 88%);
+  opacity: 0;
+  animation: plantos-eye-glint 4.5s ease-in-out infinite;
+}
+
+.plantos-eye-left {
+  left: 14px;
+}
+
+.plantos-eye-right {
+  left: 27px;
+  animation-delay: 90ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plantos-cat-logo,
+  .plantos-eye-shine {
+    animation: none;
+  }
+}

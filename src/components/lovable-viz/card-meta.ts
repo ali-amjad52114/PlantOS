@@ -1,5 +1,5 @@
 /** Flat catalog of Lovable→PlantOS cards. Question wiring comes later. */
-import { REPLIT_DECKS } from "./replit-visuals";
+import { REPLIT_DECK_SEEDS } from "./replit-decks-data";
 
 export type LovableCardMeta = {
   type: string;
@@ -74,7 +74,7 @@ const BASE_LOVABLE_CARD_META: LovableCardMeta[] = [
   { type: "ForecastTrajectory", label: "Forecast trajectory", hint: "Actual vs plan S-curve", deck: 12, deckName: "Value by area", roleHint: "finance", description: "S-curve actual vs plan forecast. Finance." },
 ];
 
-const REPLIT_CARD_META: LovableCardMeta[] = REPLIT_DECKS.flatMap((deck, deckIndex) =>
+const REPLIT_CARD_META: LovableCardMeta[] = REPLIT_DECK_SEEDS.flatMap((deck, deckIndex) =>
   deck.cards.map((card) => ({
     type: card.id,
     label: card.label,
