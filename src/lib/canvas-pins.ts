@@ -210,8 +210,8 @@ export function upsertBoundTowerAsCards(
   return next;
 }
 
-/** First ask lands exactly this many question-relevant charts on the canvas. */
-export const FIRST_ASK_CANVAS_CARD_COUNT = 2;
+/** First ask may land up to this many charts (parallel brief uses 4; typical asks select 2). */
+export const FIRST_ASK_CANVAS_CARD_COUNT = 4;
 
 /** Pins created by first-ask / bound-tower auto-land (safe to replace on a new first ask). */
 export function isAutoBoundCanvasPin(pin: CanvasPin): boolean {

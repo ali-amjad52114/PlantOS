@@ -188,7 +188,8 @@ export default function PlantOSPage() {
 
   const snapshotPersonaBag = useCallback((m: ShellMode) => {
     personaBagRef.current[m] = {
-      canvasPins: canvasPinsRef.current,
+      // Do not persist canvas pins — switching persona must not resurrect graphs.
+      canvasPins: [],
       movedChatPinKeys: [...movedKeysRef.current],
       firstAskDone: sessionFirstAskDoneRef.current,
       allowChatCharts: allowChatChartsRef.current,
@@ -199,27 +200,35 @@ export default function PlantOSPage() {
 
   const restorePersonaBag = useCallback((m: ShellMode) => {
     const bag = personaBagRef.current[m];
+    // Always enter a persona on an empty canvas. Charts only after Ask in this focus.
+    setCanvasPins([]);
+    setMovedChatPinKeys(new Set());
+    setAutoHiddenTowerKey(null);
+    setAllowChatCharts(false);
+    // Placement resets with the empty canvas so the next Ask can land charts again.
+    sessionFirstAskDoneRef.current = false;
+    setSessionFirstAskDone(false);
     if (!bag) {
-      sessionFirstAskDoneRef.current = false;
-      setSessionFirstAskDone(false);
-      setAllowChatCharts(false);
-      setAutoHiddenTowerKey(null);
-      setCanvasPins([]);
-      setMovedChatPinKeys(new Set());
       dismissedPinIdsRef.current = new Set();
       return;
     }
-    sessionFirstAskDoneRef.current = bag.firstAskDone;
-    setSessionFirstAskDone(bag.firstAskDone);
-    setAllowChatCharts(bag.allowChatCharts);
-    setAutoHiddenTowerKey(bag.autoHiddenTowerKey);
-    setCanvasPins(bag.canvasPins);
-    setMovedChatPinKeys(new Set(bag.movedChatPinKeys));
     dismissedPinIdsRef.current = new Set(bag.dismissedPinIds);
   }, []);
 
   const applyChatPlacementFlags = useCallback((chatId: string | null, firstAskDone: boolean) => {
     activeChatIdRef.current = chatId;
+    // Canvas was cleared on persona focus — do not re-arm "first ask done" from chat
+    // storage while the board is empty, or leftover flags would block canvas landing
+    // and leave the user with an empty stage after Ask.
+    if (canvasPinsRef.current.length === 0) {
+      sessionFirstAskDoneRef.current = false;
+      setSessionFirstAskDone(false);
+      setAllowChatCharts(false);
+      if (!firstAskDone) {
+        setAutoHiddenTowerKey(null);
+      }
+      return;
+    }
     sessionFirstAskDoneRef.current = firstAskDone;
     setSessionFirstAskDone(firstAskDone);
     setAllowChatCharts(false);
@@ -853,14 +862,11 @@ export default function PlantOSPage() {
     [tryRevealBoundTower]
   );
 
-  // Hang: keep waiting UI — do not dump CH cards before the chat answer exists.
+  // Hang: keep waiting UI (progress bar) — do not dump CH cards before the chat answer exists.
   useEffect(() => {
     if (!awaitingMode || !awaitingQuestion) return;
     const t = window.setTimeout(() => {
       if (!awaitingBindRef.current) return;
-      setError(
-        "Agent still waiting on Trigger/OpenAI — charts will land after the chat answer appears."
-      );
       revealWhenAnswerReadyRef.current = true;
     }, 12000);
     return () => window.clearTimeout(t);
@@ -888,13 +894,12 @@ export default function PlantOSPage() {
     if (prev !== next) {
       restorePersonaBag(next);
     }
+    // Never carry a prior tower onto the stage when changing persona.
+    setData(null);
+    setTower(null);
     if (next === "overview") {
-      setData(null);
-      setTower(towersByMode.overview ?? null);
       return;
     }
-    setData(agentVisuals[next] ?? null);
-    setTower(towersByMode[next] ?? null);
   }
 
   function askQuestion(question: string) {

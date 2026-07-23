@@ -8,7 +8,7 @@ import { z } from "zod";
 import { catalogPromptSection, normalizeSpec, validateSpec } from "../lib/catalog";
 import type { PlantChatDataTypes, PlantRole } from "../lib/plant-chat-types";
 import { plantClientDataSchema } from "../lib/plant-chat-types";
-import { CHAT_PRELOAD_CHART_SOFT_MAX } from "../lib/chat-visual-budget";
+import { chartLimitForQuestion, preferredTypesForQuestion } from "../lib/chat-visual-budget";
 import { engineerSnapshot, financeSnapshot, operationsSnapshot } from "../lib/plant-services";
 import { getReplayControl, tickReplay } from "../lib/replay";
 import { rankSelectVisuals, visualCatalogPromptSection } from "../lib/visual-catalog";
@@ -277,7 +277,7 @@ const consultEngineer = tool({
 
 const selectVisuals = tool({
   description:
-    "REQUIRED after investigate* for plant questions. Ranks the PlantOS visual catalog for THIS user question and streams a slim Lovable/Replit tower (≤2 cards) plus findingsKeys for the metric strip. Pass the exact user question. Optional preferredTypes are hints only.",
+    "REQUIRED after investigate* / investigateParallel / consultEngineer. Ranks the PlantOS visual catalog for THIS user question and streams a Lovable/Replit tower plus findingsKeys. Typical asks → ≤2 cards; multi-visual / parallel deep briefs (e.g. hydro unit + steam/hydro + temps + power/target, or all roles) → ≤4 cards. Pass the exact user question.",
   inputSchema: z.object({
     question: z.string().describe("The user's question verbatim"),
     summary: z
@@ -291,17 +291,26 @@ const selectVisuals = tool({
   }),
   execute: async ({ question, summary, preferredTypes }) => {
     const role = turnRole.role ?? "engineer";
+    const limit = chartLimitForQuestion(question);
+    // Known multi-visual starters win over model hints so the hydro feed deck lands all 4.
+    const autoPreferred = preferredTypesForQuestion(question);
+    const hints =
+      autoPreferred && autoPreferred.length > 0
+        ? autoPreferred
+        : preferredTypes && preferredTypes.length > 0
+          ? preferredTypes
+          : undefined;
     const selection = rankSelectVisuals({
       question,
       role,
       summary,
-      preferredTypes,
-      limit: CHAT_PRELOAD_CHART_SOFT_MAX,
+      preferredTypes: hints,
+      limit,
     });
     writeSelectedTower(role, selection);
     writeStep({
       id: "select-visuals",
-      label: `Selected ${selection.cardTypes.join(", ")}`,
+      label: `Selected ${selection.cardTypes.join(", ")} (${selection.cardTypes.length} charts)`,
       status: "complete",
       role,
     });
@@ -454,7 +463,7 @@ Role context:
 Presenting results — **chat visual budget + selector (strict)**:
 - **Visual priority:** Lovable → Replit → Ignition → generic. Never invent custom AI cards when a catalog card fits.
 - After investigate* / investigateParallel / consultEngineer, you **MUST** call **selectVisuals once** with the user's question (and a short summary of metric names). That tool ranks the catalog and streams the tower + findingsKeys — do not skip it.
-- Do **not** bombard the chat: selectVisuals returns ≤2 cards; the UI shows ≤1 in chat and ≤4 findings readings.
+- Do **not** bombard the chat: selectVisuals returns ≤2 cards for normal asks, ≤4 for multi-visual starters (hydro feed deck, parallel deep brief); the UI shows ≤1 in chat and lands the rest on canvas.
 - Do **not** describe the tower as a markdown table or restate findings numbers.
 - **Do not** call renderVisualization unless the user **explicitly** asks for another chart/view. When you do: one Lovable leaf preferred.
 - After tools, reply with **only** a short recommendation (1 sentence, or at most 3 tight bullets). No preamble.

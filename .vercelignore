@@ -13,6 +13,8 @@ node_modules
 data/*
 !data/plant
 !data/plant/**
+!data/fallback
+!data/fallback/latest_window.json
 docs
 lessons
 logs
