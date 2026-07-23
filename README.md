@@ -1,86 +1,179 @@
 # PlantOS
 
-> **One plant. One truth. Different intelligence for every role.**
+**One plant. One truth. Different intelligence for every role.**
 
-PlantOS is an AI-powered industrial operations workspace built on ClickHouse and Trigger.dev. It combines a SCADA-style live overview, role-specific visual workspaces, and a conversational agent that turns plant telemetry into evidence-backed engineering, operations, and finance insights.
+🔴 **Live demo: [plant-os-nine.vercel.app](https://plant-os-nine.vercel.app)** — a continuously replaying industrial plant in ClickHouse, with role-aware visuals and a Trigger.dev chat agent.
 
-- **Live demo:** [plant-os-nine.vercel.app](https://plant-os-nine.vercel.app)
-- **Repository:** [github.com/ali-amjad52114/PlantOS](https://github.com/ali-amjad52114/PlantOS)
+Built as a hackathon demonstration of **thoughtful agents over live plant telemetry** — not a production control or safety system.
 
-## Why PlantOS
+---
 
-Industrial teams often look at the same plant through disconnected tools. Engineers care about tags, limits, and equipment behavior; operators care about throughput and shift targets; finance cares about production value and cost.
+## 1. What is this?
 
-PlantOS gives every role a different lens over the same ClickHouse-backed source of truth:
+Industrial teams look at the **same plant** through disconnected tools. Engineers care about tags, limits, and equipment behavior. Operators care about throughput and shift targets. Finance cares about production value and margin. The data is usually the same; the lens is not.
 
-- **Overview / SCADA:** live plant status and replay controls.
-- **Engineer:** turbine, generator, boiler, trends, and tags nearest their limits.
-- **Operations:** production rate, capacity utilization, bottlenecks, and shift performance.
-- **Finance:** production value, operating cost, margin, and variance from plan.
-- **Maintenance:** equipment health, deviation, vibration, thermal, and inspection priorities.
-- **Safety:** limit proximity, alerts, band violations, and plant-area views.
+PlantOS is that shared lens:
 
-The six interface modes are grounded through three agent specialists: **Engineer**, **Operations**, and **Finance**. Overview, Maintenance, and Safety use the appropriate engineering or operational data bindings rather than pretending there are separate unsupported agents.
+> **Live telemetry → ClickHouse → role agent (Trigger.dev) → ranked visuals → canvas**
 
-## System architecture
+In plain words, the system:
+
+1. **Stores plant telemetry in ClickHouse Cloud** — HAI normal-operation history plus a continuously advancing `live` feed.
+2. **Replays history into “now”** with Trigger.dev tasks so the dashboard always has moving readings.
+3. Lets you pick a **persona** (Engineer, Operations, Finance, …) and **Ask** a starter or free-form question.
+4. Runs a **durable chat agent** (`chat.agent()`) that investigates ClickHouse with **role-limited tools**, then ranks a catalog of Lovable/Replit cards for *this* question.
+5. **Binds real series/metrics** onto those cards and lands the first-ask charts on a pinable **canvas** — evidence you can share outbound.
+
+The one-sentence pitch: **most plant UIs show screens — this one answers a role question with live evidence.**
+
+### Why ClickHouse + Trigger.dev together
+
+ClickHouse alone is a fast warehouse. Trigger.dev alone is durable workflows. Together they close the loop:
+
+| Layer | Job |
+|---|---|
+| **ClickHouse** | Source of truth for tags, trends, limits, and the live replay cursor |
+| **Trigger.dev** | Orchestrates the agent, schedules replay, streams progress, holds LLM keys out of the Next.js process |
+
+The LLM **never invents tag values**. It chooses a permitted tool; the tool **queries ClickHouse**; the UI shows the result.
+
+> Plant intelligence should end in evidence — not in a plausible paragraph.
+
+---
+
+## 2. Glossary (read this first)
+
+| Term | Meaning here |
+|---|---|
+| **Persona / mode** | Shell tab: Overview, Engineer, Operations, Finance, Maintenance, Safety. Each keeps its own chats. Canvas clears when you switch persona — charts appear only after Ask. |
+| **Agent role** | One of three specialists the model may use: **engineer**, **operations**, **finance**. Overview / maintenance / safety map onto those tools. |
+| **Tower** | A short list of visual card types (≤2 typical, ≤4 for multi-visual asks) selected for the question. |
+| **Canvas** | Right-hand pin board. First ask in a chat auto-lands **exactly 2** question-relevant cards; follow-ups stay in chat unless you pin. |
+| **Historian range** | On series-capable cards: **1m / 1h / 12h / 24h** window + optional **play** for a rolling live refresh. |
+| **Live feed** | Rows in `plant_readings` with `source = 'live'`, advanced by Trigger replay from historical HAI data. |
+| **Bound tower** | Tower cards with ClickHouse-derived `binding` (primary, series, items) from `/api/plant/bound-tower`. |
+| **selectVisuals** | Agent tool that ranks the visual catalog from the user question (no hardcoded card list for that ask). |
+
+---
+
+## 3. System architecture — the big picture
 
 ```mermaid
 flowchart LR
-    subgraph client["User experience"]
-        browser["PlantOS dashboard"]
+    subgraph UI["PlantOS UI (Next.js)"]
+        SHELL["Personas + Overview"]
+        CHAT["Chat · starters · Ask"]
+        CANVAS["Canvas pin board"]
+        HIST["Historian range + live play"]
     end
 
-    subgraph gateway["Application layer"]
-        nextApp["Next.js on Vercel"]
+    subgraph APP["Application layer"]
+        NEXT["Next.js on Vercel"]
+        APIS["/api/plant/*"]
+        ACTIONS["chat.createStartSessionAction"]
     end
 
-    subgraph service["Intelligence and workflows"]
-        roleApis["Role and live APIs"]
-        chatAgent["Trigger.dev chat.agent()"]
-        investigations["Durable investigation tasks"]
-        replayWorker["Scheduled replay worker"]
+    subgraph TRIGGER["Trigger.dev"]
+        AGENT["plantos-agent<br/>chat.agent()"]
+        INV["investigate* tasks"]
+        REPLAY["replay tick / burst"]
+        RT["Realtime streams"]
     end
 
-    subgraph datastore["Plant data"]
-        clickhouse["ClickHouse Cloud"]
-        localMeta["Tag map and labeled assumptions"]
+    subgraph DATA["ClickHouse Cloud"]
+        PR[("plant_readings<br/>history + live")]
+        PT[("plant_tags")]
+        CTRL[("replay control")]
     end
 
-    subgraph external["Model provider"]
-        openai["OpenAI"]
+    subgraph LLM["Model provider"]
+        OAI["OpenAI<br/>(Trigger dashboard keys)"]
     end
 
-    browser -->|"HTTPS and streamed UI"| nextApp
-    nextApp -->|"Role and live routes"| roleApis
-    nextApp -->|"Chat session"| chatAgent
-    roleApis -->|"Queries telemetry"| clickhouse
-    roleApis -->|"Reads metadata"| localMeta
-    chatAgent -->|"Runs tools"| investigations
-    investigations -->|"Queries telemetry"| clickhouse
-    replayWorker -->|"Copies history into live feed"| clickhouse
-    chatAgent -.->|"OpenAI: tool-aware reasoning"| openai
+    UI --> NEXT
+    CHAT --> ACTIONS --> AGENT
+    AGENT --> OAI
+    AGENT --> INV
+    INV --> PR
+    APIS --> PR
+    APIS --> PT
+    REPLAY --> PR
+    REPLAY --> CTRL
+    AGENT -.->|progress + tower| RT
+    RT --> UI
+    APIS --> CANVAS
+    APIS --> HIST
 ```
 
-## How ClickHouse is used
+**How to read this diagram:**
 
-ClickHouse is not a decorative integration. It is the analytical and live-data foundation of the product.
+- **The UI** is one workspace: personas on the left, chat + Ask, canvas on the right.
+- **Next.js** serves the shell and plant APIs; it does **not** hold the long-running agent loop.
+- **Trigger.dev** owns durable chat, investigation tasks, and the replay writer. LLM keys live in the Trigger environment.
+- **ClickHouse** is the only plant truth: history, live, tags, and replay cursor.
 
-### 1. Historical telemetry store
+---
 
-PlantOS loads the **HAI 20.07 normal-operation `train1` dataset** into ClickHouse Cloud:
+## 4. The closed loop — what happens when you Ask
+
+This is the heart of the product.
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant UI as PlantOS UI
+    participant Next as Next.js
+    participant Ag as Trigger chat.agent
+    participant CH as ClickHouse
+    participant LLM as OpenAI
+
+    U->>UI: Pick persona + Ask (starter or free-form)
+    UI->>Next: createStartSessionAction + public token
+    Next-->>UI: session credentials
+    UI->>Ag: stream user message + clientData.role
+    Ag->>LLM: role-limited tools only
+    LLM-->>Ag: call investigateEngineer / Ops / Finance
+    Ag->>CH: latest tags, trends, attention / shift / finance
+    CH-->>Ag: analytical rows
+    Ag->>LLM: call selectVisuals(question)
+    Note over Ag: rankSelectVisuals — catalog scoring, not hardcoded cards
+    Ag-->>UI: stream tower + findingsKeys + wait phases
+    LLM-->>Ag: short takeaway (no invented numbers)
+    Ag-->>UI: final assistant text
+    UI->>Next: POST /api/plant/bound-tower (card types)
+    Next->>CH: bind series / primaries
+    Next-->>UI: typed card bindings
+    UI->>UI: first ask → land 2 cards on canvas
+```
+
+**Plain-language walkthrough:**
+
+1. **You ask** — e.g. Engineer Q1 about hydro unit, steam vs hydro MW, component temps, and power vs target.
+2. **Trigger starts a durable chat turn** with only that role’s investigate tool.
+3. **ClickHouse is queried** for live/history evidence (deterministic SQL via `@clickhouse/client`).
+4. **`selectVisuals` ranks** the Lovable catalog from the question text; preferred types are optional hints only.
+5. **Next.js binds** the chosen card types to CH series and lands **two** cards on the canvas for the first ask.
+6. **Historian controls** (where allowlisted) let you change the window and hit **play** for 1s rolling updates — still from ClickHouse.
+
+---
+
+## 5. How we use ClickHouse
+
+ClickHouse is not a decorative integration. It is the **analytical and live-data foundation**.
+
+### 5.1 Historical telemetry store
+
+PlantOS loads the **HAI 20.07 normal-operation `train1`** dataset into ClickHouse Cloud:
 
 | Property | Value |
 |---|---:|
-| Historical readings | 1,486,080 |
+| Historical readings | ~1.5M |
 | Distinct plant tags | 24 |
 | Dataset rate | 1 Hz |
-| Historical period | 2019-09-11 to 2019-09-15 |
-| Plant areas | Boiler, turbine, water treatment, and HIL steam/hydro |
-| Primary production signal | `P4_ST_PO` - steam-turbine power output |
+| Plant areas | Boiler, turbine, water, HIL steam/hydro |
+| Primary production signal | `P4_ST_PO` (steam turbine power, MW) |
 
-The source dataset contains 309,600 timestamps. PlantOS normalizes selected signals into a long-form analytical table, creating one row per timestamp and tag.
-
-### 2. Schema designed for time-series analysis
+### 5.2 Schema shaped for time series
 
 ```sql
 CREATE TABLE plantos.plant_readings (
@@ -94,257 +187,205 @@ CREATE TABLE plantos.plant_readings (
 )
 ENGINE = MergeTree
 ORDER BY (tag, ts);
-
-CREATE TABLE plantos.plant_tags (
-  tag         String,
-  label       String,
-  area        String,
-  unit        String,
-  normal_min  Float64,
-  normal_max  Float64,
-  description String,
-  kind        String
-)
-ENGINE = MergeTree
-ORDER BY tag;
 ```
 
-This structure supports fast latest-value queries, recent trends, area-level aggregation, comparisons against normal ranges, and separation of historical versus replayed live rows.
+- `source = 'history'` — immutable HAI load  
+- `source = 'live'` — replayed “now” rows  
+- Trends use `source IN ('live', 'history')` with a rolling window from `max(ts)`
 
-### 3. Continuously replayed live feed
+### 5.3 Continuously replayed live feed
 
-Trigger.dev advances the historical dataset into a simulated live feed. Each replay tick:
+Trigger.dev advances history into live:
 
-1. Reads the current replay cursor and speed from ClickHouse.
-2. Selects the next historical timestamps with parameterized ClickHouse queries.
-3. Copies their tag values into new rows with current wall-clock timestamps.
-4. Preserves `original_ts` for provenance.
-5. Uses idempotency checks so overlapping workers cannot duplicate a historical timestamp.
+1. Read replay cursor + speed from a control table in ClickHouse.  
+2. Select the next historical timestamps.  
+3. Insert new rows with **current wall-clock** `ts`, keeping `original_ts` for provenance.  
+4. Idempotency so overlapping workers do not duplicate a tick.
 
-The same `plant_readings` table therefore supports both:
+Start / Pause / Reset / speed in the UI talk to `/api/plant/replay` and Trigger burst tasks.
 
-- `source = 'history'` for the immutable dataset.
-- `source = 'live'` for the continuously advancing demo feed.
+### 5.4 What the app queries
 
-Replay state is stored in a small `ReplacingMergeTree` control table. Start, pause, reset, and speed changes are therefore shared state rather than browser-only animation.
+| Use | ClickHouse role |
+|---|---|
+| Engineer snapshot | Latest boiler/turbine/generator tags, trends, distance to normal band |
+| Operations snapshot | Rate, shift progress, utilization, bottleneck area |
+| Finance snapshot | Production quantity from CH × **labeled** synthetic rates |
+| Card series / historian | Tag trends for 1m–24h windows (downsampled, capped) |
+| Live strip | `max(ts)`, row counts, freshness |
 
-### 4. Role-specific analytical queries
+**Timezone contract:** naive ClickHouse datetimes are treated as **UTC** and shown in **America/Los_Angeles** via `src/lib/format-time.ts` (charts + overview).
 
-The application queries ClickHouse through `@clickhouse/client` to produce deterministic snapshots:
+Evidence docs: [`data/HAI_SOURCE.md`](data/HAI_SOURCE.md), [`data/PROOF_CLICKHOUSE.md`](data/PROOF_CLICKHOUSE.md).
 
-- **Engineer:** latest boiler, turbine, and generator values; recent trends; normal-range distance; attention ranking.
-- **Operations:** current production rate; shift production; projected output; utilization; bottleneck area.
-- **Finance:** production quantity from ClickHouse combined with explicitly labeled demo rates to calculate value, cost, margin, and variance.
-- **Live health:** latest live timestamp, row counts, replay state, and feed freshness.
+---
 
-The `/api/plant/bound-tower` route also binds ClickHouse results directly to the visual-card catalog. Suggested questions therefore populate real visualization payloads instead of returning static screenshots.
+## 6. How we use Trigger.dev
 
-### ClickHouse data flow
+Trigger.dev is the **orchestration spine**: durable chat, scheduled replay, realtime progress, and isolated secrets.
 
-```mermaid
-flowchart LR
-    sourceData["HAI train1 CSV"] -->|"Normalize selected tags"| loader["Python loader"]
-    loader -->|"Insert JSONEachRow"| history["plant_readings: history"]
-    history -->|"Read next timestamps"| replay["Trigger.dev replay task"]
-    replay -->|"Insert current timestamps"| live["plant_readings: live"]
-    history -->|"Trends and aggregates"| snapshots["Role snapshots"]
-    live -->|"Latest values and freshness"| snapshots
-    snapshots -->|"Typed card bindings"| dashboard["Visual stage and chat towers"]
-```
+### 6.1 `chat.agent()` — PlantOS agent
 
-## How Trigger.dev and `chat.agent()` are used
+`plantos-agent` (`src/trigger/plant-agent.ts`) uses Trigger **`chat.agent()`** and the React hook **`useTriggerChatTransport`**.
 
-Trigger.dev supplies the durable workflow and conversational orchestration layer.
+Per turn:
 
-### Durable conversational agent
+- Next.js mints a scoped session + public token (`chat.createStartSessionAction`).  
+- Typed **`clientData.role`** selects which investigate tool exists for that turn.  
+- The model must call **investigate\*** then **selectVisuals** (catalog ranker).  
+- Progress, towers, and audit events stream as typed UI data parts.  
+- Metadata records role, tools, deck, and elapsed time.
 
-`plantos-agent` is implemented with Trigger.dev `chat.agent()` and connected to the React interface with `useTriggerChatTransport`.
+LLM API keys stay in the **Trigger dashboard** — not required in the Vercel browser bundle.
 
-For every conversation:
-
-- The server creates a scoped chat session and one-hour public token.
-- Typed `clientData.role` selects the specialist tool available for that turn.
-- The model receives only the matching Engineer, Operations, or Finance investigation tool.
-- Shared tools expose live-feed status and validated supplemental visualizations.
-- Investigation progress, tower cards, and audit data stream into the UI as typed data parts.
-- Turn hooks record the role, tools used, selected visual deck, and elapsed time in Trigger.dev metadata.
-
-This keeps role selection explicit and prevents the model from calling irrelevant plant tools.
-
-### Chat request flow
-
-```mermaid
-sequenceDiagram
-    title PlantOS agent investigation
-    participant User
-    participant Dashboard
-    participant NextServer
-    participant TriggerAgent
-    participant ClickHouse
-    participant OpenAI
-
-    User->>Dashboard: Ask a role-specific question
-    Dashboard->>NextServer: Create session and scoped token
-    NextServer-->>Dashboard: Session credentials
-    Dashboard->>TriggerAgent: Stream message with clientData.role
-    TriggerAgent->>OpenAI: Prompt with role-limited tools
-    OpenAI-->>TriggerAgent: Select investigation tool
-    TriggerAgent->>ClickHouse: Query latest values and trends
-    ClickHouse-->>TriggerAgent: Analytical rows
-    TriggerAgent-->>Dashboard: Stream progress and visual tower
-    OpenAI-->>TriggerAgent: Short evidence-backed takeaway
-    TriggerAgent-->>Dashboard: Stream final response
-    Dashboard-->>User: Visuals and narrative
-```
-
-### Trigger.dev tasks
+### 6.2 Durable tasks
 
 | Task | Purpose |
 |---|---|
-| `plantos-agent` | Durable `chat.agent()` session with role-aware tools and streamed UI data. |
-| `plant-investigate` | Deterministic Engineer, Operations, or Finance ClickHouse investigation. |
-| `plant-route-investigate` | Routes a question to one specialist, then uses `triggerAndWait()` and checks `Result.ok`. |
-| `plant-parallel-investigate` | Fans out to all three specialists with `batchTriggerAndWait()`. |
-| `plant-replay-tick` | Scheduled replay spine that advances telemetry every minute. |
-| `plant-replay-burst` | On-demand dense replay used by the Start control. |
+| `plantos-agent` | Role-aware `chat.agent()` session |
+| `plant-investigate` | Single-role ClickHouse investigation |
+| `plant-route-investigate` | Route then `triggerAndWait()` |
+| `plant-parallel-investigate` | Fan-out all three roles (`batchTriggerAndWait`) |
+| `plant-replay-tick` | Scheduled replay spine |
+| `plant-replay-burst` | Dense on-demand replay for **Start live** |
 
-The replay tasks share a queue with `concurrencyLimit: 1`, ensuring the scheduled writer and an on-demand burst cannot write simultaneously. Durable `wait.for()` calls space replay sub-ticks without holding a conventional server process open.
+Replay tasks share a queue with **`concurrencyLimit: 1`** so scheduled and burst writers never collide. `wait.for()` spaces sub-ticks without holding a long-lived Node process.
+
+### 6.3 Realtime in the UI
+
+- Chat stream → wait phases on the canvas (“Thinking…”, tool names, binding).  
+- Replay health → Trigger Realtime run progress while Start is playing.  
+- Outbound send → phased Capturing → Sending → Sent from task metadata where wired.
 
 ### Why both deterministic tasks and an LLM?
 
-The LLM decides which permitted tool to use and explains the result. It does **not** invent telemetry or calculate plant state from prose.
-
-The data path remains deterministic:
-
 ```text
-User question -> role-limited tool -> ClickHouse query -> typed visual payload -> concise explanation
+User question → role-limited tool → ClickHouse SQL → typed visuals → short takeaway
 ```
 
-If LLM-based routing is unavailable, the standalone routing task has a keyword fallback so the demo can still select an appropriate specialist.
+The LLM chooses tools and explains. **Numbers come from ClickHouse** (or disclosed finance assumptions).
 
-## What is real and what is assumed
+---
 
-Transparency matters in an industrial interface.
+## 7. What is real and what is assumed
 
-**Real / data-backed:**
+**Real / data-backed**
 
-- HAI 20.07 telemetry stored in ClickHouse Cloud.
-- Latest readings, histories, trends, tag rankings, and replay state.
-- Trigger.dev task execution, scheduling, concurrency control, waits, metadata, and streamed chat sessions.
-- Role APIs and ClickHouse-bound visualization payloads.
+- HAI telemetry in ClickHouse Cloud  
+- Latest values, trends, attention rankings, replay state  
+- Trigger task execution, scheduling, waits, chat sessions, Realtime  
+- ClickHouse-bound visualization payloads  
 
-**Synthetic but clearly labeled:**
+**Synthetic but labeled**
 
-- Plant capacity and shift targets.
-- Electricity value, fuel cost, labor cost, and fixed operating cost.
-- Revenue, margin, and variance calculations derived from those demo rates.
+- Capacity / shift targets  
+- Electricity, fuel, labor, fixed cost rates  
+- Dollar value, margin, variance  
 
-The assumptions live in [`data/plant/assumptions.json`](data/plant/assumptions.json) and are identified in the interface. PlantOS is a hackathon demonstration, not a production control or safety system.
+Assumptions: [`data/plant/assumptions.json`](data/plant/assumptions.json).
 
-## Try the demo
+---
 
-1. Open the [live PlantOS deployment](https://plant-os-nine.vercel.app).
-2. Use **Overview / SCADA** to confirm that the live feed is active.
-3. Switch to **Engineer**, **Operations**, or **Finance**.
-4. Choose a suggested question or ask your own.
-5. Watch the investigation progress while Trigger.dev streams the visual tower and final takeaway.
-6. Compare role perspectives: each view uses the same underlying ClickHouse telemetry.
+## 8. Try the demo
 
-Useful questions:
+1. Open [plant-os-nine.vercel.app](https://plant-os-nine.vercel.app).  
+2. **Overview** — confirm live feed / Start live if needed.  
+3. Switch to **Engineer** (or Ops / Finance) — canvas starts **empty**.  
+4. Click a **starter question** or type your own **Ask**.  
+5. Wait for the Trigger investigation → takeaway in chat → **two charts** on the canvas.  
+6. On series cards: change **1m / 1h / 12h / 24h**, hit **play** for live rolling updates.
 
-- **Engineer:** Which tags are closest to their normal limits?
-- **Operations:** Are we on track to meet the current shift target?
-- **Finance:** What is the current production value and margin versus plan?
+Useful asks:
 
-## API surface
+- **Engineer:** hydro unit, steam vs hydro, component temps, power vs target  
+- **Operations:** shift target / bottleneck / capacity utilization  
+- **Finance:** production value and margin vs plan  
 
-| Route | Description |
-|---|---|
-| `GET /api/plant/live` | Live/history counts, latest timestamps, freshness, and replay control. |
-| `GET /api/plant/engineer` | Engineer snapshot from plant telemetry. |
-| `GET /api/plant/operations` | Operations snapshot and shift calculations. |
-| `GET /api/plant/finance` | Finance snapshot with labeled synthetic assumptions. |
-| `GET /api/plant/bound-tower?mode=engineer&q=0` | Question-to-card mapping populated with ClickHouse-derived bindings. |
-| `POST /api/plant/replay` | Start, pause, reset, speed, or replay actions. |
+---
 
-## Run locally
+## 9. Run locally
 
 ### Requirements
 
-- Node.js 20+
-- A ClickHouse instance or ClickHouse Cloud service
-- A Trigger.dev project
-- An OpenAI API key configured in Trigger.dev
+- Node.js 20+  
+- ClickHouse Cloud (or compatible) URL  
+- Trigger.dev project  
+- OpenAI key in the **Trigger** environment  
 
-### Installation
+### Setup
 
 ```bash
 npm install
 cp .env.example .env
 ```
 
-Configure the Next.js environment:
+**Next.js (`.env`):**
 
 ```env
 CLICKHOUSE_URL=https://default:<password>@<host>:8443
 TRIGGER_SECRET_KEY=tr_dev_...
-TRIGGER_PROJECT_REF=proj_chhoeiuksrbzqtmfiuxd
+TRIGGER_PROJECT_REF=proj_...
 ```
 
-Configure the Trigger.dev dashboard environment:
+**Trigger.dev dashboard env:**
 
 ```env
 CLICKHOUSE_URL=https://default:<password>@<host>:8443
 OPEN_AI=sk-...
 ```
 
-Start the app and Trigger.dev worker in separate terminals:
-
 ```bash
-npm run dev
+npm run dev          # http://localhost:3000 (or -p 3001)
+npm run dev:trigger  # Trigger worker
 ```
-
-```bash
-npm run dev:trigger
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-### Production check
 
 ```bash
 npm run build
 ```
 
-## Repository guide
+---
+
+## 10. Repository guide
 
 | Path | Purpose |
 |---|---|
-| `src/app/` | Next.js pages, server actions, and plant API routes. |
-| `src/components/` | Premium shell, chat UI, SCADA controls, charts, and visual catalog. |
-| `src/lib/` | ClickHouse client, replay logic, snapshots, card bindings, and typed payloads. |
-| `src/trigger/` | `chat.agent()` and durable Trigger.dev tasks. |
-| `data/plant/` | Plant metadata, tag map, and disclosed demo assumptions. |
-| `scripts/` | Dataset loading, seeding, and verification utilities. |
-| `docs/` | Product, demo, build, and submission documentation. |
-| `lessons/` | Engineering plans, correctness rules, and implementation learnings. |
-| `reference/` | Local design references and clickable HTML mockups; not deployed. |
-
-## Evidence and attribution
-
-- [`data/HAI_SOURCE.md`](data/HAI_SOURCE.md) documents dataset source, version, checksum, period, and fallback choice.
-- [`data/PROOF_CLICKHOUSE.md`](data/PROOF_CLICKHOUSE.md) records the ClickHouse count, time range, distinct tags, and query statistics.
-- HAI dataset source: [icsdataset/hai](https://github.com/icsdataset/hai).
-
-## Technology
-
-- **Data:** ClickHouse Cloud, `@clickhouse/client`
-- **Workflows and agent:** Trigger.dev, `chat.agent()`, Trigger Realtime
-- **Application:** Next.js 16, React 19, TypeScript
-- **AI:** Vercel AI SDK, OpenAI
-- **Visuals:** Recharts, typed visual-card catalog, streamed plant towers
-- **Hosting:** Vercel
+| `src/app/` | Next.js pages, server actions, `/api/plant/*` |
+| `src/components/` | Shell, chat, canvas, Lovable charts, outbound |
+| `src/lib/` | ClickHouse client, snapshots, bindings, visual ranker, time (PT) |
+| `src/trigger/` | `chat.agent()`, investigate + replay tasks |
+| `data/plant/` | Tag map + disclosed assumptions |
+| `scripts/` | Loaders, Playwright e2e, selector golden tests |
+| `docs/` | Product lock, build, submission notes |
+| `lessons/` | Locked plans (first-ask canvas, historian, wait UI, …) |
+| `reference/` | Design mockups (not deployed) |
 
 ---
 
-PlantOS demonstrates a closed loop from **dashboard -> insight -> action-ready workflow**, while keeping the underlying evidence visible and the demo assumptions honest.
+## 11. Technology
+
+| Area | Stack |
+|---|---|
+| Data | ClickHouse Cloud, `@clickhouse/client` |
+| Workflows / agent | Trigger.dev 4.x, `chat.agent()`, Realtime |
+| App | Next.js 16, React 19, TypeScript |
+| AI | Vercel AI SDK, OpenAI (via Trigger) |
+| Visuals | Recharts, Lovable/Replit card catalog |
+| Host | Vercel |
+
+---
+
+## 12. Status — core loop verified
+
+| Component | Status |
+|---|---|
+| ClickHouse history + live replay | ✅ |
+| Role snapshots (engineer / ops / finance) | ✅ |
+| Trigger `chat.agent()` + role tools | ✅ |
+| `selectVisuals` catalog ranking | ✅ |
+| First-ask canvas (2 cards) + follow-up in chat | ✅ |
+| Historian range + live play (UTC→PT axis) | ✅ |
+| Persona switch → empty canvas | ✅ |
+
+---
+
+PlantOS closes the loop from **dashboard → Ask → ClickHouse evidence → Trigger orchestration → canvas**, while keeping synthetic finance assumptions honest and visible.

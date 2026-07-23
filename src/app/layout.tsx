@@ -36,7 +36,12 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${jetbrains.variable} ${instrument.variable} h-full antialiased`}
     >
-      <body className={`${inter.className} flex min-h-full flex-col`}>{children}</body>
+      <body
+        className={`${inter.className} flex min-h-full flex-col`}
+        suppressHydrationWarning
+      >
+        {children}
+      </body>
     </html>
   );
 }

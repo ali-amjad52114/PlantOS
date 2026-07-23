@@ -1158,29 +1158,37 @@ function MessagePart({
     const text = String(part.text || "").trim();
     if (!text) return null;
     return (
-      <div className="chat-md max-w-none rounded-xl border border-border/70 bg-surface-2/50 px-3 py-2.5 text-[13px] leading-relaxed text-foreground/90">
+      <div className="chat-md max-w-none rounded-xl border border-border/70 bg-surface-2/50 px-3.5 py-3 text-[13px] leading-relaxed text-foreground/90">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
-            p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
-            ul: ({ children }) => <ul className="my-1.5 list-disc space-y-1 pl-4">{children}</ul>,
-            ol: ({ children }) => <ol className="my-1.5 list-decimal space-y-1 pl-4">{children}</ol>,
-            li: ({ children }) => <li className="leading-snug">{children}</li>,
+            p: ({ children }) => (
+              <p className="mb-2.5 last:mb-0 leading-relaxed">{children}</p>
+            ),
+            ul: ({ children }) => (
+              <ul className="my-2 list-disc space-y-2 pl-4 marker:text-muted-foreground">{children}</ul>
+            ),
+            ol: ({ children }) => (
+              <ol className="my-2 list-decimal space-y-2 pl-4 marker:text-muted-foreground">{children}</ol>
+            ),
+            li: ({ children }) => (
+              <li className="leading-relaxed pl-0.5 [&>p]:mb-0">{children}</li>
+            ),
             strong: ({ children }) => (
               <strong className="font-semibold text-foreground">{children}</strong>
             ),
             h1: ({ children }) => (
-              <h3 className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">
+              <h3 className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">
                 {children}
               </h3>
             ),
             h2: ({ children }) => (
-              <h3 className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">
+              <h3 className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">
                 {children}
               </h3>
             ),
             h3: ({ children }) => (
-              <h3 className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">
+              <h3 className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">
                 {children}
               </h3>
             ),

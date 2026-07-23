@@ -236,7 +236,7 @@ const investigateParallel = tool({
       ok: true as const,
       okCount: out.okCount,
       roles,
-      note: "Synthesize one answer across roles, then call selectVisuals once. Do not restate every number.",
+      note: "Synthesize across roles as 3–5 short Markdown bullets (Engineer / Ops / Finance / Action) — not one dense paragraph. Then call selectVisuals once. Do not restate every number.",
     };
   },
 });
@@ -317,7 +317,7 @@ const selectVisuals = tool({
     return {
       ok: true,
       ...selection,
-      note: "Tower streamed. Do not restate numbers. One-sentence takeaway only. Do not call renderVisualization unless the user asked for another chart.",
+      note: "Tower streamed. Reply in 3–5 short Markdown bullets (not one paragraph). Do not restate every number. Do not call renderVisualization unless the user asked for another chart.",
     };
   },
 });
@@ -383,7 +383,7 @@ const renderVisualization = tool({
     return {
       ok: true,
       family: priority.family,
-      note: "Rendered to the user. Don't repeat the data as text — add at most a one-sentence takeaway. Do not call renderVisualization again unless the user asked for more charts.",
+      note: "Rendered to the user. Don't repeat the data as text — at most 2–3 short Markdown bullets. Do not call renderVisualization again unless the user asked for more charts.",
     };
   },
 });
@@ -464,9 +464,13 @@ Presenting results — **chat visual budget + selector (strict)**:
 - **Visual priority:** Lovable → Replit → Ignition → generic. Never invent custom AI cards when a catalog card fits.
 - After investigate* / investigateParallel / consultEngineer, you **MUST** call **selectVisuals once** with the user's question (and a short summary of metric names). That tool ranks the catalog and streams the tower + findingsKeys — do not skip it.
 - Do **not** bombard the chat: selectVisuals returns ≤2 cards for normal asks, ≤4 for multi-visual starters (hydro feed deck, parallel deep brief); the UI shows ≤1 in chat and lands the rest on canvas.
-- Do **not** describe the tower as a markdown table or restate findings numbers.
+- Do **not** describe the tower as a markdown table or dump every findings number into prose.
 - **Do not** call renderVisualization unless the user **explicitly** asks for another chart/view. When you do: one Lovable leaf preferred.
-- After tools, reply with **only** a short recommendation (1 sentence, or at most 3 tight bullets). No preamble.
+- **Reply format (always — every turn):** use short Markdown, never a dense paragraph.
+  - Prefer **3–5 bullets** (\`- …\`), optionally with a one-line bold lead (\`**Ops:**\` / \`**Alert:**\` / \`**Action:**\`).
+  - Parallel / multi-role briefs: one bullet per lens (Engineer / Ops / Finance) plus one Action bullet — not a single run-on summary.
+  - Bold only the key metric or alert in each bullet. Blank line between sections if you use a lead line.
+  - Max ~6 short lines total. Charts + Engineer Findings already show the detail — chat is the scan layer.
 - Production and finance dollar figures are SYNTHETIC DEMO ASSUMPTIONS — say so briefly when discussing money.
 - Never invent tag values. If a tool fails, report the error.
 - Dataset: HAI normal-op (train1), production signal tag P4_ST_PO (steam turbine power MW).

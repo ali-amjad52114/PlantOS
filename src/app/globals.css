@@ -330,3 +330,246 @@ body {
     border-left: 0;
   }
 }
+
+/* —— Landing (/) —— */
+.landing-shell {
+  background-color: var(--color-background);
+  background-image:
+    radial-gradient(
+      1100px 620px at 50% -8%,
+      color-mix(in oklab, var(--primary) 14%, transparent),
+      transparent 58%
+    ),
+    radial-gradient(
+      900px 520px at 12% 88%,
+      color-mix(in oklab, var(--accent) 16%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      700px 420px at 92% 70%,
+      color-mix(in oklab, var(--primary) 8%, transparent),
+      transparent 50%
+    );
+}
+
+.landing-grid {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--foreground) 3.5%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--foreground) 3.5%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 42%, black 20%, transparent 75%);
+  opacity: 0.55;
+}
+
+.landing-orb {
+  pointer-events: none;
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(48px);
+  opacity: 0.55;
+}
+
+.landing-orb-a {
+  top: 12%;
+  left: 8%;
+  width: 280px;
+  height: 280px;
+  background: color-mix(in oklab, var(--primary) 28%, transparent);
+  animation: landing-drift 14s ease-in-out infinite;
+}
+
+.landing-orb-b {
+  right: 6%;
+  bottom: 14%;
+  width: 320px;
+  height: 320px;
+  background: color-mix(in oklab, var(--accent) 32%, transparent);
+  animation: landing-drift 18s ease-in-out infinite reverse;
+}
+
+.landing-orb-c {
+  top: 42%;
+  left: 48%;
+  width: 220px;
+  height: 220px;
+  background: color-mix(in oklab, var(--chart-3) 22%, transparent);
+  animation: landing-drift 16s ease-in-out infinite;
+  animation-delay: -4s;
+}
+
+@keyframes landing-drift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(18px, -22px) scale(1.06);
+  }
+}
+
+.landing-cat-glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 120%;
+  height: 120%;
+  translate: -50% -50%;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--accent) 35%, transparent) 0%,
+    color-mix(in oklab, var(--primary) 18%, transparent) 42%,
+    transparent 70%
+  );
+  animation: landing-pulse 5.5s ease-in-out infinite;
+}
+
+@keyframes landing-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+.landing-cat .landing-eye-left {
+  top: 28%;
+  left: 32%;
+  width: 10px;
+  height: 10px;
+}
+
+.landing-cat .landing-eye-right {
+  top: 28%;
+  left: 58%;
+  width: 10px;
+  height: 10px;
+}
+
+.landing-rise {
+  animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.landing-rise-1 {
+  animation-delay: 0.05s;
+}
+.landing-rise-2 {
+  animation-delay: 0.12s;
+}
+.landing-rise-3 {
+  animation-delay: 0.22s;
+}
+.landing-rise-4 {
+  animation-delay: 0.28s;
+}
+.landing-rise-5 {
+  animation-delay: 0.38s;
+}
+
+.landing-start {
+  animation: landing-cta-glow 3.2s ease-in-out infinite;
+}
+
+@keyframes landing-cta-glow {
+  0%,
+  100% {
+    box-shadow: 0 12px 32px -12px color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 16px 40px -10px color-mix(in oklab, var(--primary) 72%, transparent);
+  }
+}
+
+.landing-stage-glow {
+  position: absolute;
+  inset: 8% 4% 4% 8%;
+  border-radius: 40% 45% 42% 48%;
+  background:
+    radial-gradient(
+      circle at 40% 35%,
+      color-mix(in oklab, var(--primary) 22%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      circle at 70% 65%,
+      color-mix(in oklab, var(--accent) 28%, transparent),
+      transparent 50%
+    );
+  filter: blur(28px);
+  animation: landing-pulse 6s ease-in-out infinite;
+}
+
+.landing-preview-card {
+  transition:
+    transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
+    box-shadow 0.45s ease;
+}
+
+.landing-preview-card:hover {
+  transform: translateY(-4px) scale(1.015);
+  box-shadow: 0 28px 56px -24px oklch(0.22 0.05 265 / 0.4);
+  z-index: 50;
+}
+
+.landing-float {
+  animation: landing-card-float 7s ease-in-out infinite;
+  will-change: transform;
+}
+
+.landing-float-a {
+  animation-delay: 0s;
+  transform: rotate(-2.2deg);
+}
+.landing-float-b {
+  animation-delay: -1.4s;
+  transform: rotate(3.4deg);
+}
+.landing-float-c {
+  animation-delay: -2.8s;
+  transform: rotate(1.6deg);
+}
+.landing-float-d {
+  animation-delay: -0.7s;
+  transform: rotate(-3deg);
+}
+.landing-float-e {
+  animation-delay: -3.5s;
+  transform: rotate(1.2deg);
+}
+.landing-float-f {
+  animation-delay: -2s;
+  transform: rotate(4deg);
+}
+
+@keyframes landing-card-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-orb-a,
+  .landing-orb-b,
+  .landing-orb-c,
+  .landing-stage-glow,
+  .landing-rise,
+  .landing-start,
+  .landing-float {
+    animation: none;
+  }
+
+  .landing-preview-card:hover {
+    transform: none;
+  }
+}

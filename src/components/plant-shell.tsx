@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { MoreHorizontal, X } from "lucide-react";
 import { LovablePaletteControls } from "@/components/palette-playground";
@@ -57,7 +58,7 @@ export function PlantShell({
     <div className="shell-bg noise-bg flex min-h-screen flex-col bg-background text-foreground">
       <header className="glass-bar sticky top-0 z-30 border-b-2 border-border">
         <div className="relative mx-auto flex max-w-[1600px] items-center gap-3 px-4 py-2.5 lg:px-6">
-          <div className="flex shrink-0 items-center gap-2.5">
+          <Link href="/" className="flex shrink-0 items-center gap-2.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
             <div className="plantos-cat-logo relative h-11 w-11 shrink-0 overflow-hidden rounded-xl border border-border/80 bg-white shadow-sm">
               <Image
                 src="/plantos-cat.webp"
@@ -74,7 +75,7 @@ export function PlantShell({
               Plant<span className="text-foreground/60">OS</span>
               <span className="ml-1 text-primary">AI</span>
             </div>
-          </div>
+          </Link>
 
           <nav
             className="plantos-primary-nav flex w-fit min-w-0 shrink-0 items-center justify-center gap-0.5 overflow-x-auto rounded-xl border-2 border-border bg-surface p-1 shadow-sm"
