@@ -1,5 +1,6 @@
 /**
  * Canvas pins proof — lessons/PLAN_CHAT_CANVAS_PINS.md
+ * 2-column grid: span 1 | 2-wide; reorder by drag-swap.
  * Uses ?e2eCanvas=1 fixture so OpenAI/Trigger are not required.
  */
 import { chromium } from "playwright";
@@ -30,77 +31,120 @@ try {
   await fixture.waitFor({ state: "visible" });
   result.steps.fixtureVisible = true;
 
-  // Pin a single card (not a 4-card tower).
-  await page.getByTestId("pin-to-canvas").first().click();
+  const pinButtons = page.getByTestId("pin-to-canvas");
+  await pinButtons.nth(0).click();
   await page.waitForTimeout(400);
 
   const pins = page.getByTestId("canvas-pin");
-  const countAfterPin = await pins.count();
-  result.steps.pinCount = countAfterPin;
-  if (countAfterPin !== 1) throw new Error(`Expected 1 individual card pin, got ${countAfterPin}`);
+  let count = await pins.count();
+  result.steps.pinCountAfterFirst = count;
+  if (count !== 1) throw new Error(`Expected 1 pin, got ${count}`);
+
+  const span0 = await pins.first().getAttribute("data-span");
+  result.steps.spanDefault = span0;
+  if (span0 !== "1") throw new Error(`Expected default span 1, got ${span0}`);
 
   await page.screenshot({ path: resolve(OUT, "canvas-01-pinned.png") });
   result.screenshots.push("canvas-01-pinned.png");
 
-  const pin = pins.first();
-  await page.getByText(/empty canvas/i).waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
+  // Cycle size: 1 → 2 → 1
+  const resizeBtn = page.getByTestId("canvas-pin-resize").first();
+  await resizeBtn.click();
   await page.waitForTimeout(200);
-  const before = await pin.evaluate((el) => ({
-    left: el.style.left,
-    top: el.style.top,
-  }));
+  const span2 = await pins.first().getAttribute("data-span");
+  result.steps.spanAfterFirstCycle = span2;
+  if (span2 !== "2") throw new Error(`Expected span 2 after resize, got ${span2}`);
 
-  const box = await pin.boundingBox();
-  if (!box) throw new Error("No pin bounding box");
-  // Drag from card body (below chrome), not the resize corner.
-  await page.mouse.move(box.x + Math.min(80, box.width / 3), box.y + 40);
-  await page.mouse.down();
-  await page.mouse.move(box.x + 140, box.y + 120, { steps: 12 });
-  await page.mouse.up();
+  await page.screenshot({ path: resolve(OUT, "canvas-02b-resized.png") });
+  result.screenshots.push("canvas-02b-resized.png");
+
+  // Reset to 1 for tidy reorder layout, then pin a second chart
+  await resizeBtn.click();
+  await page.waitForTimeout(150);
+  result.steps.spanAfterSecondCycle = await pins.first().getAttribute("data-span");
+  if (result.steps.spanAfterSecondCycle !== "1") {
+    throw new Error("Expected span back to 1 after second cycle");
+  }
+
+  const pinBtnCount = await pinButtons.count();
+  if (pinBtnCount < 2) throw new Error("Need at least 2 fixture pin sources for reorder");
+  await pinButtons.nth(1).click();
+  await page.waitForTimeout(400);
+  count = await pins.count();
+  result.steps.pinCountAfterSecond = count;
+  if (count !== 2) throw new Error(`Expected 2 pins, got ${count}`);
+
+  const orderBefore = await pins.evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-pin-id"))
+  );
+  result.steps.orderBefore = orderBefore;
+
+  // HTML5 DnD reorder — synthetic DragEvent + mutable DataTransfer (mouse dragTo won't set MIME)
+  const fromId = orderBefore[0];
+  const toId = orderBefore[1];
+  await page.evaluate(
+    ({ fromId: a, toId: b }) => {
+      const source = document.querySelector(
+        `[data-testid="canvas-pin"][data-pin-id="${a}"] [data-testid="canvas-pin-drag"]`
+      );
+      const target = document.querySelector(`[data-testid="canvas-pin"][data-pin-id="${b}"]`);
+      if (!source || !target) throw new Error("missing reorder source/target");
+      const store = {};
+      const dataTransfer = {
+        dropEffect: "move",
+        effectAllowed: "all",
+        files: [],
+        items: [],
+        types: [],
+        setData(type, val) {
+          store[type] = String(val);
+          if (!this.types.includes(type)) this.types.push(type);
+        },
+        getData(type) {
+          return store[type] || "";
+        },
+        clearData() {
+          for (const k of Object.keys(store)) delete store[k];
+          this.types.length = 0;
+        },
+        setDragImage() {},
+      };
+      const fire = (el, type) => {
+        const ev = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "dataTransfer", { value: dataTransfer });
+        el.dispatchEvent(ev);
+      };
+      fire(source, "dragstart");
+      fire(target, "dragenter");
+      fire(target, "dragover");
+      fire(target, "drop");
+      fire(source, "dragend");
+    },
+    { fromId, toId }
+  );
   await page.waitForTimeout(400);
 
-  const after = await pin.evaluate((el) => ({
-    left: el.style.left,
-    top: el.style.top,
-  }));
-  result.steps.moveBefore = before;
-  result.steps.moveAfter = after;
-  if (before.left === after.left && before.top === after.top) {
-    throw new Error("Pin position did not change after drag");
+  const orderAfter = await pins.evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-pin-id"))
+  );
+  result.steps.orderAfter = orderAfter;
+  if (
+    orderBefore[0] === orderAfter[0] &&
+    orderBefore[1] === orderAfter[1]
+  ) {
+    throw new Error("Pin order did not swap after drag-to-reorder");
+  }
+  if (orderAfter[0] !== orderBefore[1] || orderAfter[1] !== orderBefore[0]) {
+    throw new Error(
+      `Expected swapped order ${orderBefore[1]},${orderBefore[0]} got ${orderAfter.join(",")}`
+    );
   }
 
   await page.screenshot({ path: resolve(OUT, "canvas-02-moved.png") });
   result.screenshots.push("canvas-02-moved.png");
 
-  // Resize via SE handle
-  const sizeBefore = await pin.evaluate((el) => ({
-    w: el.style.width,
-    h: el.style.height,
-  }));
-  const handle = page.getByTestId("canvas-pin-resize").first();
-  const hb = await handle.boundingBox();
-  if (!hb) throw new Error("No resize handle");
-  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(hb.x + 80, hb.y + 60, { steps: 6 });
-  await page.mouse.up();
-  await page.waitForTimeout(300);
-  const sizeAfter = await pin.evaluate((el) => ({
-    w: el.style.width,
-    h: el.style.height,
-  }));
-  result.steps.resizeBefore = sizeBefore;
-  result.steps.resizeAfter = sizeAfter;
-  if (sizeBefore.w === sizeAfter.w && sizeBefore.h === sizeAfter.h) {
-    throw new Error("Pin size did not change after resize");
-  }
-
-  await page.screenshot({ path: resolve(OUT, "canvas-02b-resized.png") });
-  result.screenshots.push("canvas-02b-resized.png");
-
-  // Click pin body (not X) to focus — click center of pin
-  const box2 = await pin.boundingBox();
-  await page.mouse.click(box2.x + box2.width / 2, box2.y + box2.height / 2);
+  // Zoom via explicit control
+  await page.getByTestId("canvas-pin-zoom").first().click();
   await page.waitForTimeout(300);
   const focus = page.getByTestId("canvas-pin-focus");
   await focus.waitFor({ state: "visible" });

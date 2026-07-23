@@ -51,6 +51,13 @@ tmp/
 logs/
 data/hai/raw/
 data/hai/repo/
+data/outbound/
+
+# Env files (keep outbound example templates committable)
+.env*
+!.env.example
+!.env.outbound.example
+data/browser-e2e/
 
 # Local temp JSON from API probes
 /start.json
@@ -60,4 +67,3 @@ data/hai/repo/
 /tmp-*.json
 /out-*.json
 /j*.json
-.env*

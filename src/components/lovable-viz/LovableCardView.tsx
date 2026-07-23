@@ -2,11 +2,16 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { CardLiveContext } from "./card-live-context";
+import { CardLiveContext, ChartHeightContext } from "./card-live-context";
 import { InteractiveCardBody } from "./chart-chrome";
 import { DECKS } from "./PlantVisualDeck";
 import { LOVABLE_CARD_META } from "./card-meta";
 import type { CardBinding } from "@/lib/plant-tower";
+
+/** Chart body height — same for 1 box and 2-wide (wide ≠ tall). */
+export function chartHeightForSpan(_span?: 1 | 2) {
+  return 228;
+}
 
 const cardByType = Object.fromEntries(
   DECKS.flatMap((d) => d.cards.map((c) => [c.id, { ...c, roleHint: d.roleHint, deckName: d.name }]))
@@ -54,13 +59,16 @@ export function LovableCardView({
   hint,
   binding,
   compact = false,
+  chartHeight,
 }: {
   type: string;
   label?: string | null;
   hint?: string | null;
   binding?: CardBinding | null;
-  /** Tighter min-height for canvas pins. */
+  /** Tighter layout for canvas pins. */
   compact?: boolean;
+  /** Explicit chart pixel height (canvas span 1 | 2). */
+  chartHeight?: number;
 }) {
   const card = cardByType[type];
   if (!card) {
@@ -71,27 +79,36 @@ export function LovableCardView({
     );
   }
 
+  const bodyH = chartHeight ?? (compact ? 228 : undefined);
+
   return (
     <CardLiveContext.Provider value={binding ?? null}>
-      <article
-        data-lovable-card={type}
-        data-interactive-card="true"
-        className="card-surface relative flex flex-col overflow-visible p-4 rise"
-        style={{ background: card.bg, minHeight: compact ? 200 : 300 }}
-      >
-        {/* Top: title + hint left, live value right */}
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-foreground">{label ?? card.label}</div>
-            <div className="text-[11px] text-muted-foreground">{hint ?? card.hint}</div>
+      <ChartHeightContext.Provider value={bodyH ?? null}>
+        <article
+          data-lovable-card={type}
+          data-interactive-card="true"
+          className={`card-surface relative flex flex-col rise ${
+            compact ? "overflow-hidden p-3" : "overflow-visible p-4"
+          }`}
+          style={{ background: card.bg, minHeight: compact ? undefined : 300 }}
+        >
+          <div className={`flex shrink-0 items-start justify-between gap-3 ${compact ? "mb-2" : "mb-3"}`}>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-foreground">{label ?? card.label}</div>
+              <div className="text-[11px] text-muted-foreground">{hint ?? card.hint}</div>
+            </div>
+            {binding ? <LiveValue binding={binding} /> : null}
           </div>
-          {binding ? <LiveValue binding={binding} /> : null}
-        </div>
-        {/* Bottom: full-width interactive chart */}
-        <div className="relative h-56 min-h-0 w-full min-w-0 flex-1 overflow-visible">
-          <InteractiveCardBody type={type} />
-        </div>
-      </article>
+          <div
+            className={`relative w-full min-w-0 shrink-0 ${
+              compact ? "overflow-hidden" : "h-56 min-h-0 flex-1 overflow-visible"
+            }`}
+            style={bodyH ? { height: bodyH } : undefined}
+          >
+            <InteractiveCardBody type={type} />
+          </div>
+        </article>
+      </ChartHeightContext.Provider>
     </CardLiveContext.Provider>
   );
 }

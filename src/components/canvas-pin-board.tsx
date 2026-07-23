@@ -2,20 +2,26 @@
 
 import type { ReactNode, DragEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import { Pin, X } from "lucide-react";
-import { LovableCardView } from "@/components/lovable-viz/LovableCardView";
+import { GripVertical, Maximize2, Pin, X } from "lucide-react";
+import { LovableCardView, chartHeightForSpan } from "@/components/lovable-viz/LovableCardView";
 import { FindingsBody } from "@/components/plant-chat-findings";
 import { PlantTowerGrid } from "@/components/plant-tower-grid";
 import { Visualization } from "@/components/visualization";
 import {
   CANVAS_DND_MIME,
+  CANVAS_REORDER_MIME,
   createPin,
+  cycleSpan,
+  normalizeSpan,
+  setPinSpan,
+  sortedPins,
+  spanLabel,
+  swapPinOrder,
   type CanvasPin,
   type CanvasPinDraft,
+  type CanvasSpan,
 } from "@/lib/canvas-pins";
-
-const MIN_W = 220;
-const MIN_H = 160;
+import { captionLinesForPin } from "@/lib/outbound/caption";
 
 export function CanvasPinBoard({
   pins,
@@ -27,17 +33,16 @@ export function CanvasPinBoard({
 }: {
   pins: CanvasPin[];
   onPinsChange: (next: CanvasPin[]) => void;
-  onDropDraft: (draft: CanvasPinDraft, at: { x: number; y: number }) => void;
+  onDropDraft: (draft: CanvasPinDraft) => void;
   className?: string;
   emptyHint?: string;
-  /** Shown only when the canvas has no pins (e.g. Overview live panel). */
   overviewSlot?: ReactNode;
 }) {
-  const surfaceRef = useRef<HTMLDivElement>(null);
   const pinsRef = useRef(pins);
   pinsRef.current = pins;
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!focusedId) return;
@@ -49,32 +54,29 @@ export function CanvasPinBoard({
   }, [focusedId]);
 
   const focused = focusedId ? pins.find((p) => p.id === focusedId) : null;
-
-  function localPoint(clientX: number, clientY: number) {
-    const el = surfaceRef.current;
-    if (!el) return { x: 16, y: 16 };
-    const r = el.getBoundingClientRect();
-    return {
-      x: Math.max(0, clientX - r.left),
-      y: Math.max(0, clientY - r.top),
-    };
-  }
+  const ordered = sortedPins(pins);
 
   function onDragOver(e: DragEvent) {
-    if (![...e.dataTransfer.types].includes(CANVAS_DND_MIME)) return;
+    const types = [...e.dataTransfer.types];
+    if (!types.includes(CANVAS_DND_MIME) && !types.includes(CANVAS_REORDER_MIME)) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
+    e.dataTransfer.dropEffect = types.includes(CANVAS_REORDER_MIME) ? "move" : "copy";
     setDragOver(true);
   }
 
   function onDrop(e: DragEvent) {
     e.preventDefault();
     setDragOver(false);
+    setDropTargetId(null);
+    const reorderId = e.dataTransfer.getData(CANVAS_REORDER_MIME);
+    if (reorderId) {
+      // Dropped on empty board area — keep order
+      return;
+    }
     const raw = e.dataTransfer.getData(CANVAS_DND_MIME);
     if (!raw) return;
     try {
-      const draft = JSON.parse(raw) as CanvasPinDraft;
-      onDropDraft(draft, localPoint(e.clientX, e.clientY));
+      onDropDraft(JSON.parse(raw) as CanvasPinDraft);
     } catch {
       /* ignore */
     }
@@ -85,52 +87,74 @@ export function CanvasPinBoard({
     if (focusedId === id) setFocusedId(null);
   }
 
-  function movePin(id: string, x: number, y: number) {
-    onPinsChange(pinsRef.current.map((p) => (p.id === id ? { ...p, x, y } : p)));
+  function cycleSize(id: string) {
+    const pin = pinsRef.current.find((p) => p.id === id);
+    if (!pin) return;
+    onPinsChange(setPinSpan(pinsRef.current, id, cycleSpan(normalizeSpan(pin.span))));
   }
 
-  function resizePin(id: string, w: number, h: number) {
-    onPinsChange(
-      pinsRef.current.map((p) =>
-        p.id === id
-          ? { ...p, w: Math.max(MIN_W, Math.round(w)), h: Math.max(MIN_H, Math.round(h)) }
-          : p
-      )
-    );
+  function onPinDropReorder(targetId: string, e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    setDropTargetId(null);
+    const fromId = e.dataTransfer.getData(CANVAS_REORDER_MIME);
+    if (fromId && fromId !== targetId) {
+      onPinsChange(swapPinOrder(pinsRef.current, fromId, targetId));
+      return;
+    }
+    const raw = e.dataTransfer.getData(CANVAS_DND_MIME);
+    if (raw) {
+      try {
+        onDropDraft(JSON.parse(raw) as CanvasPinDraft);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${className ?? ""}`}>
       <div
-        ref={surfaceRef}
         data-testid="canvas-pin-board"
         onDragOver={onDragOver}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
-        className={`relative min-h-0 flex-1 overflow-hidden bg-surface-2/30 ${
-          dragOver ? "ring-2 ring-inset ring-primary/50 bg-primary/5" : ""
+        className={`min-h-0 flex-1 overflow-auto p-3 ${
+          dragOver ? "bg-primary/5 ring-2 ring-inset ring-primary/40" : "bg-surface-2/30"
         }`}
       >
-        {pins.length === 0 && overviewSlot ? (
-          <div className="absolute inset-0 overflow-auto p-4">{overviewSlot}</div>
-        ) : null}
+        {pins.length === 0 && overviewSlot ? <div className="h-full">{overviewSlot}</div> : null}
         {pins.length === 0 && !overviewSlot && (
-          <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-8 text-center text-sm text-muted-foreground">
+          <p className="flex h-full min-h-[240px] items-center justify-center px-8 text-center text-sm text-muted-foreground">
             {emptyHint ??
-              "This canvas holds your charts. Pin or drag visuals from chat — then move, resize, zoom, or remove them here."}
+              "Pin charts from chat. Each chart sits in a grid slot: 1 box or 2 wide."}
           </p>
         )}
-        {pins.map((pin) => (
-          <CanvasPinCard
-            key={pin.id}
-            pin={pin}
-            dimmed={Boolean(focusedId) && focusedId !== pin.id}
-            onRemove={() => removePin(pin.id)}
-            onMove={(x, y) => movePin(pin.id, x, y)}
-            onResize={(w, h) => resizePin(pin.id, w, h)}
-            onFocus={() => setFocusedId(pin.id)}
-          />
-        ))}
+        {pins.length > 0 && (
+          <div
+            data-testid="canvas-grid"
+            className="grid auto-rows-auto grid-cols-1 content-start items-start gap-3 sm:grid-cols-2"
+          >
+            {ordered.map((pin) => (
+              <CanvasGridCell
+                key={pin.id}
+                pin={pin}
+                highlight={dropTargetId === pin.id}
+                onRemove={() => removePin(pin.id)}
+                onCycleSize={() => cycleSize(pin.id)}
+                onFocus={() => setFocusedId(pin.id)}
+                onDragOverCell={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDropTargetId(pin.id);
+                }}
+                onDragLeaveCell={() => setDropTargetId((id) => (id === pin.id ? null : id))}
+                onDropOnCell={(e) => onPinDropReorder(pin.id, e)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {focused && (
@@ -160,93 +184,89 @@ export function CanvasPinBoard({
   );
 }
 
-function CanvasPinCard({
+function CanvasGridCell({
   pin,
-  dimmed,
+  highlight,
   onRemove,
-  onMove,
-  onResize,
+  onCycleSize,
   onFocus,
+  onDragOverCell,
+  onDragLeaveCell,
+  onDropOnCell,
 }: {
   pin: CanvasPin;
-  dimmed?: boolean;
+  highlight?: boolean;
   onRemove: () => void;
-  onMove: (x: number, y: number) => void;
-  onResize: (w: number, h: number) => void;
+  onCycleSize: () => void;
   onFocus: () => void;
+  onDragOverCell: (e: DragEvent) => void;
+  onDragLeaveCell: () => void;
+  onDropOnCell: (e: DragEvent) => void;
 }) {
-  const modeRef = useRef<"idle" | "move" | "resize">("idle");
-  const startRef = useRef({ x: 0, y: 0, px: 0, py: 0, w: 0, h: 0 });
-  const movedRef = useRef(false);
-
-  useEffect(() => {
-    const onMoveWin = (e: MouseEvent) => {
-      const mode = modeRef.current;
-      if (mode === "idle") return;
-      const s = startRef.current;
-      const dx = e.clientX - s.x;
-      const dy = e.clientY - s.y;
-      if (Math.abs(dx) + Math.abs(dy) > 3) movedRef.current = true;
-      if (mode === "move") {
-        onMove(Math.max(0, s.px + dx), Math.max(0, s.py + dy));
-      } else if (mode === "resize") {
-        onResize(s.w + dx, s.h + dy);
-      }
-    };
-    const onUpWin = () => {
-      if (modeRef.current === "move" && !movedRef.current) onFocus();
-      modeRef.current = "idle";
-    };
-    window.addEventListener("mousemove", onMoveWin);
-    window.addEventListener("mouseup", onUpWin);
-    return () => {
-      window.removeEventListener("mousemove", onMoveWin);
-      window.removeEventListener("mouseup", onUpWin);
-    };
-  }, [onFocus, onMove, onResize]);
-
-  const w = pin.w ?? 360;
-  const h = pin.h ?? 280;
+  const span: CanvasSpan = pin.span === 2 ? 2 : 1;
+  const spanClass =
+    span === 2 ? "col-span-1 row-span-1 sm:col-span-2" : "col-span-1 row-span-1";
+  const title =
+    pin.payload.kind === "card"
+      ? pin.payload.card.label || pin.payload.card.type
+      : pin.payload.kind === "finding"
+        ? pin.payload.item.tag
+        : pin.kind;
+  const caption = captionLinesForPin(pin);
 
   return (
     <div
       data-testid="canvas-pin"
       data-pin-id={pin.id}
-      style={{ left: pin.x, top: pin.y, width: w, height: h }}
-      className={`absolute z-20 flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-md transition-opacity ${
-        dimmed ? "opacity-30" : "opacity-100"
+      data-span={span}
+      onDragOver={onDragOverCell}
+      onDragLeave={onDragLeaveCell}
+      onDrop={onDropOnCell}
+      className={`flex h-fit flex-col self-start overflow-hidden rounded-xl border bg-surface shadow-sm ${spanClass} ${
+        highlight ? "border-primary ring-2 ring-primary/30" : "border-border"
       }`}
-      onMouseDown={(e) => {
-        if (e.button !== 0) return;
-        const t = e.target as HTMLElement;
-        if (t.closest("[data-pin-chrome]") || t.closest("[data-pin-resize]")) return;
-        e.preventDefault();
-        modeRef.current = "move";
-        movedRef.current = false;
-        startRef.current = {
-          x: e.clientX,
-          y: e.clientY,
-          px: pin.x,
-          py: pin.y,
-          w,
-          h,
-        };
-      }}
     >
       <div
-        data-pin-chrome
-        className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-surface-2/80 px-2 py-1"
+        draggable
+        data-testid="canvas-pin-drag"
+        onDragStart={(e) => {
+          e.dataTransfer.setData(CANVAS_REORDER_MIME, pin.id);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        className="flex shrink-0 cursor-grab items-center gap-1.5 border-b border-border bg-surface-2/90 px-2 py-1.5 active:cursor-grabbing"
+        title="Drag to swap place with another chart"
       >
-        <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {pin.payload.kind === "card"
-            ? pin.payload.card.label || pin.payload.card.type
-            : pin.payload.kind === "finding"
-              ? pin.payload.item.tag
-              : pin.kind}
-          <span className="ml-2 font-normal normal-case tracking-normal text-muted-foreground/80">
-            {Math.round(w)}×{Math.round(h)}
-          </span>
+        <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
         </span>
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] tabular text-muted-foreground">
+          {spanLabel(span)}
+        </span>
+        <button
+          type="button"
+          data-testid="canvas-pin-resize"
+          title="Cycle size: 1 box ↔ 2 wide"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCycleSize();
+          }}
+          className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          data-testid="canvas-pin-zoom"
+          title="Zoom"
+          onClick={(e) => {
+            e.stopPropagation();
+            onFocus();
+          }}
+          className="rounded px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          Zoom
+        </button>
         <button
           type="button"
           data-testid="canvas-pin-remove"
@@ -260,31 +280,14 @@ function CanvasPinCard({
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-2 text-left" style={{ pointerEvents: "none" }}>
-        <PinBody pin={pin} />
-      </div>
       <div
-        data-pin-resize
-        data-testid="canvas-pin-resize"
-        onMouseDown={(e) => {
-          if (e.button !== 0) return;
-          e.preventDefault();
-          e.stopPropagation();
-          modeRef.current = "resize";
-          movedRef.current = true;
-          startRef.current = {
-            x: e.clientX,
-            y: e.clientY,
-            px: pin.x,
-            py: pin.y,
-            w,
-            h,
-          };
-        }}
-        className="absolute bottom-0 right-0 z-10 h-4 w-4 cursor-se-resize"
-        title="Resize"
+        className="shrink-0 p-2"
+        data-outbound-capture="chart"
+        data-outbound-title={caption.title}
+        data-outbound-line1={caption.line1}
+        data-outbound-line2={caption.line2}
       >
-        <span className="absolute bottom-1 right-1 h-2.5 w-2.5 border-b-2 border-r-2 border-muted-foreground/70" />
+        <PinBody pin={pin} />
       </div>
     </div>
   );
@@ -293,6 +296,7 @@ function CanvasPinCard({
 function PinBody({ pin }: { pin: CanvasPin }) {
   if (pin.payload.kind === "card") {
     const c = pin.payload.card;
+    const span: CanvasSpan = pin.span === 2 ? 2 : 1;
     return (
       <LovableCardView
         type={c.type}
@@ -300,6 +304,7 @@ function PinBody({ pin }: { pin: CanvasPin }) {
         hint={c.hint}
         binding={c.binding}
         compact
+        chartHeight={chartHeightForSpan(span)}
       />
     );
   }
@@ -324,7 +329,6 @@ function PinBody({ pin }: { pin: CanvasPin }) {
       </div>
     );
   }
-  // Legacy whole-tower / findings (should not be created anymore)
   if (pin.payload.kind === "tower") {
     return <PlantTowerGrid tower={pin.payload.tower} />;
   }
@@ -357,11 +361,15 @@ export function PinableVisual({
   return (
     <div
       data-testid={testId ?? "pinable-visual"}
-      draggable
-      onDragStart={onDragStart}
       className="relative rounded-xl border border-border/80 bg-surface"
     >
-      <div className="flex items-center justify-end gap-1 border-b border-border/60 px-2 py-1">
+      <div
+        draggable
+        onDragStart={onDragStart}
+        className="flex cursor-grab items-center justify-end gap-1 border-b border-border/60 bg-surface-2/50 px-2 py-1.5 active:cursor-grabbing"
+        title="Drag onto the canvas"
+      >
+        <GripVertical className="mr-auto h-3.5 w-3.5 text-muted-foreground" />
         <span className="mr-auto text-[10px] uppercase tracking-wide text-muted-foreground">
           Drag to canvas
         </span>
@@ -369,7 +377,7 @@ export function PinableVisual({
           type="button"
           data-testid="pin-to-canvas"
           onClick={() => onPin?.(draft)}
-          className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-foreground hover:border-primary/40 hover:bg-primary/5"
+          className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-foreground hover:border-primary/40 hover:bg-primary/5"
         >
           <Pin className="h-3 w-3" />
           Pin

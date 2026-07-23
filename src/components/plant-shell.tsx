@@ -15,8 +15,8 @@ export type ShellMode =
 
 export const SHELL_MODES: { id: ShellMode; label: string }[] = [
   { id: "overview", label: "Home" },
-  { id: "operations", label: "Operations" },
-  { id: "engineer", label: "Engineers" },
+  { id: "operations", label: "Operation" },
+  { id: "engineer", label: "Engineer" },
   { id: "finance", label: "Finance" },
   { id: "maintenance", label: "Maintenance" },
   { id: "safety", label: "Safety" },
@@ -55,8 +55,8 @@ export function PlantShell({
 }) {
   return (
     <div className="shell-bg noise-bg flex min-h-screen flex-col bg-background text-foreground">
-      <header className="glass-bar sticky top-0 z-30">
-        <div className="mx-auto flex max-w-[1600px] items-center gap-3 px-4 py-2.5 lg:px-6">
+      <header className="glass-bar sticky top-0 z-30 border-b-2 border-border">
+        <div className="relative mx-auto flex max-w-[1600px] items-center gap-3 px-4 py-2.5 lg:px-6">
           <div className="flex shrink-0 items-center gap-2.5">
             <div className="plantos-cat-logo relative h-11 w-11 shrink-0 overflow-hidden rounded-xl border border-border/80 bg-white shadow-sm">
               <Image
@@ -77,7 +77,7 @@ export function PlantShell({
           </div>
 
           <nav
-            className="flex min-w-0 flex-1 items-center justify-center gap-0.5 overflow-x-auto rounded-xl border border-border bg-surface p-1 shadow-sm"
+            className="plantos-primary-nav flex w-fit min-w-0 shrink-0 items-center justify-center gap-0.5 overflow-x-auto rounded-xl border-2 border-border bg-surface p-1 shadow-sm"
             aria-label="Primary dashboard views"
           >
             {SHELL_MODES.map((m) => {
@@ -99,7 +99,7 @@ export function PlantShell({
             })}
           </nav>
 
-          <div className="flex shrink-0 items-center justify-end gap-1.5">
+          <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5 rounded-xl border-2 border-border bg-surface p-1">
             <div
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold ${
                 feedActive
@@ -114,7 +114,7 @@ export function PlantShell({
               />
               {feedLabel}
             </div>
-            <p className="hidden text-xs font-medium text-muted-foreground xl:block">{liveMeta}</p>
+            <p className="hidden text-xs font-medium text-muted-foreground 2xl:block">{liveMeta}</p>
             <div className="hidden items-center gap-1 lg:flex">{replayControls}</div>
             <button
               type="button"
@@ -144,8 +144,8 @@ export function PlantShell({
         </div>
       )}
 
-      <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-4 p-4 lg:px-6 lg:py-5">
-        <div className="mb-0 flex gap-1 rounded-xl border border-border bg-surface p-1 lg:hidden">
+      <div className="flex min-h-0 w-full flex-1 flex-col">
+        <div className="m-2 mb-0 flex gap-1 rounded-xl border border-border bg-surface p-1 lg:hidden">
           {(["chat", "visuals"] as const).map((t) => (
             <button
               key={t}
@@ -162,16 +162,16 @@ export function PlantShell({
           ))}
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(340px,2fr)_minmax(0,3fr)]">
+        <div className="plantos-workspace grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(340px,2fr)_minmax(0,3fr)]">
           <section
-            className={`min-h-[52vh] lg:min-h-0 ${
+            className={`min-h-[52vh] overflow-hidden lg:min-h-0 ${
               mobileTab === "chat" ? "flex" : "hidden lg:flex"
             } flex-col`}
           >
             {chat}
           </section>
           <section
-            className={`min-h-[52vh] lg:min-h-0 ${
+            className={`min-h-[52vh] overflow-hidden lg:min-h-0 ${
               mobileTab === "visuals" ? "flex" : "hidden lg:flex"
             } flex-col`}
           >
@@ -179,7 +179,7 @@ export function PlantShell({
           </section>
         </div>
 
-        <footer className="border-t border-border pt-3 text-[11px] text-muted-foreground">
+        <footer className="hidden">
           Different intelligence for every role. · Read-only · Demo assumptions labeled
         </footer>
       </div>

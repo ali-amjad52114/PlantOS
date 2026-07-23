@@ -15,13 +15,19 @@ import { VisualStage, agentRoleForMode } from "@/components/visual-stage";
 import { useRealtimeInvestigate } from "@/hooks/useRealtimeInvestigate";
 import { useRealtimeReplay } from "@/hooks/useRealtimeReplay";
 import {
-  cardDraftFromTower,
+  clearDismissedForBoundQuestion,
   createPin,
   expandTowerIntoCardPins,
   upsertBoundTowerAsCards,
   type CanvasPin,
   type CanvasPinDraft,
 } from "@/lib/canvas-pins";
+import {
+  deriveTriggerWaitView,
+  initialTriggerWaitView,
+  type TriggerWaitSignals,
+  type TriggerWaitView,
+} from "@/lib/trigger-wait-phases";
 import { defaultPlantTower, type PlantTowerPayload } from "@/lib/plant-tower";
 import { resolveQuestionIndex } from "@/lib/question-card-maps";
 import { MODE_QUESTIONS } from "@/lib/shell-prompts";
@@ -90,7 +96,15 @@ export default function PlantOSPage() {
   const [awaitingQuestion, setAwaitingQuestion] = useState<string | null>(null);
   const [awaitingMode, setAwaitingMode] = useState<ShellMode | null>(null);
   const [canvasPins, setCanvasPins] = useState<CanvasPin[]>([]);
+  const [triggerWait, setTriggerWait] = useState<TriggerWaitView | null>(null);
+  const [waitStartedAt, setWaitStartedAt] = useState<number | null>(null);
+  const [chBinding, setChBinding] = useState(false);
+  const waitSignalsRef = useRef<TriggerWaitSignals | null>(null);
+  const chBindingRef = useRef(false);
+  chBindingRef.current = chBinding;
   const [e2eCanvas, setE2eCanvas] = useState(false);
+  /** Pins the user removed — live CH refresh must not resurrect them. */
+  const dismissedPinIdsRef = useRef<Set<string>>(new Set());
   const askBridgeRef = useRef<((q: string) => void) | null>(null);
   const modeRef = useRef<ShellMode>(mode);
   modeRef.current = mode;
@@ -121,18 +135,41 @@ export default function PlantOSPage() {
       if (draft.payload.kind === "tower") {
         return expandTowerIntoCardPins(prev, draft.payload.tower, draft.sourceMessageId);
       }
+      // Explicit pin from chat — allow this id again if it was dismissed.
+      if (draft.payload.kind === "card" && draft.payload.meta?.questionIndex != null) {
+        const mode = draft.payload.meta.mode ?? draft.payload.meta.role ?? "";
+        const id = `bound_${mode}_q${draft.payload.meta.questionIndex}_${draft.payload.card.type}`;
+        dismissedPinIdsRef.current.delete(id);
+      }
       return [...prev, createPin(draft, prev)];
     });
     setMobileTab("visuals");
   }, []);
 
-  const dropPinDraft = useCallback((draft: CanvasPinDraft, at: { x: number; y: number }) => {
+  const dropPinDraft = useCallback((draft: CanvasPinDraft) => {
     setCanvasPins((prev) => {
       if (draft.payload.kind === "tower") {
-        return expandTowerIntoCardPins(prev, draft.payload.tower, draft.sourceMessageId, at);
+        return expandTowerIntoCardPins(prev, draft.payload.tower, draft.sourceMessageId);
       }
-      return [...prev, createPin(draft, prev, at)];
+      return [...prev, createPin(draft, prev)];
     });
+  }, []);
+
+  const onCanvasPinsChange = useCallback((next: CanvasPin[]) => {
+    setCanvasPins((prev) => {
+      for (const p of prev) {
+        if (!next.some((n) => n.id === p.id)) {
+          dismissedPinIdsRef.current.add(p.id);
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const applyBoundTowerPins = useCallback((tower: PlantTowerPayload) => {
+    setCanvasPins((prev) =>
+      upsertBoundTowerAsCards(prev, tower, dismissedPinIdsRef.current)
+    );
   }, []);
 
   const fixtureTower = useMemo(
@@ -241,7 +278,9 @@ export default function PlantOSPage() {
         if (cancelled || payload?.error) return;
         setTower(payload);
         setTowersByMode((prev) => ({ ...prev, [mode]: payload }));
-        setCanvasPins((prev) => upsertBoundTowerAsCards(prev, payload as PlantTowerPayload));
+        setCanvasPins((prev) =>
+          upsertBoundTowerAsCards(prev, payload as PlantTowerPayload, dismissedPinIdsRef.current)
+        );
       } catch {
         /* ignore */
       }
@@ -427,6 +466,26 @@ export default function PlantOSPage() {
     const pending = awaitingBindRef.current;
     if (!pending) return;
     awaitingBindRef.current = null;
+    setChBinding(true);
+    setTriggerWait((prev) => {
+      const signals = waitSignalsRef.current;
+      if (!signals) {
+        return (
+          prev ??
+          deriveTriggerWaitView({
+            chatStatus: "ready",
+            parts: [],
+            binding: true,
+            elapsedMs: waitStartedAt ? Date.now() - waitStartedAt : 0,
+          })
+        );
+      }
+      return deriveTriggerWaitView({
+        ...signals,
+        binding: true,
+        elapsedMs: waitStartedAt ? Date.now() - waitStartedAt : signals.elapsedMs,
+      });
+    });
 
     const flushHeldVisual = (storeMode: ShellMode) => {
       const held = heldVisualRef.current;
@@ -442,20 +501,20 @@ export default function PlantOSPage() {
     if (pending.q == null) {
       heldTowerRef.current = null;
       flushHeldVisual(modeRef.current === "overview" ? "engineer" : modeRef.current);
+      setChBinding(false);
       setStageProgress(null);
       setAwaitingQuestion(null);
       setAwaitingMode(null);
+      setTriggerWait(null);
+      setWaitStartedAt(null);
       return;
     }
 
     setStageProgress({
       percentage: 92,
-      label: "Trigger complete — binding ClickHouse cards…",
+      label: "Binding live ClickHouse cards…",
       steps: [
-        { id: "trigger", label: "Trigger", done: true, active: false },
-        { id: "investigate", label: "Investigate", done: true, active: false },
-        { id: "bind", label: "Bind CH", done: false, active: true },
-        { id: "ready", label: "Ready", done: false, active: false },
+        { id: "binding", label: "Bind CH", done: false, active: true },
       ],
     });
 
@@ -467,78 +526,87 @@ export default function PlantOSPage() {
       heldTowerRef.current = null;
       setTower(payload);
       setTowersByMode((prev) => ({ ...prev, [pending.mode]: payload }));
-      setCanvasPins((prev) => upsertBoundTowerAsCards(prev, payload as PlantTowerPayload));
+      applyBoundTowerPins(payload as PlantTowerPayload);
       flushHeldVisual(pending.mode);
       setError(null);
+      setChBinding(false);
+
+      const signals = waitSignalsRef.current;
+      let receipt = deriveTriggerWaitView({
+        chatStatus: "ready",
+        parts: signals?.parts ?? [],
+        binding: false,
+        elapsedMs: waitStartedAt ? Date.now() - waitStartedAt : signals?.elapsedMs,
+        chatId: signals?.chatId,
+      });
+      if (receipt.mode !== "receipt") {
+        receipt = {
+          mode: "receipt",
+          active: null,
+          done: [],
+          percentage: 100,
+          elapsedMs: receipt.elapsedMs,
+          receipt: {
+            toolNames: [],
+            elapsedMs: receipt.elapsedMs,
+            chatId: signals?.chatId,
+            detailLines: [
+              "chat.createStartSessionAction · realtime token",
+              "streamText · toStreamTextOptions",
+              "onTurnComplete · turn audit",
+              "post-run ClickHouse bind",
+            ],
+          },
+        };
+      }
+      setTriggerWait(receipt);
 
       setStageProgress({
         percentage: 100,
         label: "Cards ready from ClickHouse",
-        steps: [
-          { id: "trigger", label: "Trigger", done: true, active: false },
-          { id: "investigate", label: "Investigate", done: true, active: false },
-          { id: "bind", label: "Bind CH", done: true, active: false },
-          { id: "ready", label: "Ready", done: true, active: false },
-        ],
+        steps: [{ id: "binding", label: "Bind CH", done: true, active: false }],
       });
       window.setTimeout(() => {
         setStageProgress(null);
         setAwaitingQuestion(null);
         setAwaitingMode(null);
-      }, 500);
+        setTriggerWait(null);
+        setWaitStartedAt(null);
+      }, 1200);
       setMobileTab("visuals");
     } catch (e: any) {
       setError(String(e?.message || e));
+      setChBinding(false);
       setStageProgress(null);
       setAwaitingQuestion(null);
       setAwaitingMode(null);
+      setTriggerWait(null);
+      setWaitStartedAt(null);
       heldVisualRef.current = null;
       heldTowerRef.current = null;
     }
-  }, []);
+  }, [applyBoundTowerPins, waitStartedAt]);
+
+  const onTriggerWait = useCallback((signals: TriggerWaitSignals, chatMode: string) => {
+    if (!awaitingBindRef.current || awaitingBindRef.current.mode !== chatMode) return;
+    waitSignalsRef.current = signals;
+    const view = deriveTriggerWaitView({
+      ...signals,
+      binding: chBindingRef.current,
+      elapsedMs: waitStartedAt ? Date.now() - waitStartedAt : signals.elapsedMs,
+    });
+    setTriggerWait(view);
+  }, [waitStartedAt]);
 
   const onStreamProgress = useCallback((progress: PopulateProgress | null) => {
     if (!awaitingBindRef.current) return;
     if (!progress) return;
+    // Keep a coarse stageProgress for any legacy consumers; canvas uses triggerWait.
     const percentage = Math.min(88, progress.percentage);
-    const label = progress.label;
-    const steps: PopulateProgress["steps"] = [
-      {
-        id: "trigger",
-        label: "Trigger",
-        done: percentage >= 18,
-        active: percentage < 18,
-      },
-      {
-        id: "investigate",
-        label: "Investigate",
-        done: percentage >= 55,
-        active: percentage >= 18 && percentage < 55,
-      },
-      {
-        id: "bind",
-        label: "Bind CH",
-        done: false,
-        active: percentage >= 55,
-      },
-      { id: "ready", label: "Ready", done: false, active: false },
-    ];
-    setStageProgress((prev) => {
-      if (
-        prev &&
-        prev.percentage === percentage &&
-        prev.label === label &&
-        prev.steps.length === steps.length &&
-        prev.steps.every(
-          (s, i) =>
-            s.id === steps[i].id &&
-            s.done === steps[i].done &&
-            s.active === steps[i].active
-        )
-      ) {
-        return prev;
-      }
-      return { percentage, label, steps };
+    setStageProgress({
+      percentage,
+      label: progress.label,
+      steps: progress.steps,
     });
   }, []);
 
@@ -602,6 +670,9 @@ export default function PlantOSPage() {
       setStageProgress(null);
       setAwaitingQuestion(null);
       setAwaitingMode(null);
+      setTriggerWait(null);
+      setWaitStartedAt(null);
+      setChBinding(false);
     }
     if (next === "overview") {
       setData(null);
@@ -617,7 +688,12 @@ export default function PlantOSPage() {
     setMobileTab("visuals");
     const idx = resolveQuestionIndex(mode, question);
 
-    // Hide prior cards briefly while we show progress, then bind CH (no OpenAI required).
+    // Fresh ask may land bound cards again even if user deleted them earlier.
+    if (idx != null) {
+      clearDismissedForBoundQuestion(dismissedPinIdsRef.current, mode, idx);
+    }
+
+    // Hide prior bound tower while Trigger runs — canvas waits on stream progress, then binds CH.
     setTower(null);
     setData(null);
     setTowersByMode((prev) => {
@@ -641,40 +717,19 @@ export default function PlantOSPage() {
     };
     setAwaitingQuestion(question);
     setAwaitingMode(mode);
+    setChBinding(false);
+    waitSignalsRef.current = null;
+    const started = Date.now();
+    setWaitStartedAt(started);
+    setTriggerWait(initialTriggerWaitView(0));
     setStageProgress({
       percentage: 8,
       label: "Starting Trigger.dev agent…",
-      steps: [
-        { id: "trigger", label: "Trigger", done: false, active: true },
-        { id: "investigate", label: "Investigate", done: false, active: false },
-        { id: "bind", label: "Bind CH", done: false, active: false },
-        { id: "ready", label: "Ready", done: false, active: false },
-      ],
+      steps: [{ id: "session", label: "Session", done: false, active: true }],
     });
 
     setPendingQuestion(question);
-
-    // ClickHouse bind does not need the LLM — reveal cards quickly so demos aren't stuck on Thinking.
-    if (idx != null) {
-      window.setTimeout(() => {
-        const pending = awaitingBindRef.current;
-        if (!pending || pending.question !== question || revealInFlight.current) return;
-        setStageProgress({
-          percentage: 75,
-          label: "Binding live ClickHouse cards…",
-          steps: [
-            { id: "trigger", label: "Trigger", done: true, active: false },
-            { id: "investigate", label: "Investigate", done: false, active: true },
-            { id: "bind", label: "Bind CH", done: false, active: true },
-            { id: "ready", label: "Ready", done: false, active: false },
-          ],
-        });
-        revealInFlight.current = true;
-        void revealBoundTower().finally(() => {
-          revealInFlight.current = false;
-        });
-      }, 1600);
-    }
+    // Cards land only after Trigger finishes (onAgentBusyChange) — or the hang timeout below.
   }
 
   const view = mode === "overview" ? null : data ?? agentVisuals[mode] ?? null;
@@ -704,13 +759,15 @@ export default function PlantOSPage() {
           Start live
         </button>
       )}
-      <button
-        type="button"
-        onClick={() => replay("pause")}
-        className="rounded-xl border border-border bg-surface px-3 py-2 text-sm hover:bg-muted"
-      >
-        Pause
-      </button>
+      {playing && (
+        <button
+          type="button"
+          onClick={() => replay("pause")}
+          className="rounded-xl border border-border bg-surface px-3 py-2 text-sm hover:bg-muted"
+        >
+          Pause
+        </button>
+      )}
       <button
         type="button"
         onClick={() => replay("reset")}
@@ -816,6 +873,7 @@ export default function PlantOSPage() {
           askBridgeRef={askBridgeRef}
           onStarterQuestion={askQuestion}
           onStreamProgress={onStreamProgress}
+          onTriggerWait={onTriggerWait}
           onAgentBusyChange={onAgentBusyChange}
           onAgentError={onAgentError}
           onPinVisual={pinVisual}
@@ -834,9 +892,11 @@ export default function PlantOSPage() {
           onAskQuestion={askQuestion}
           liveMoving={liveMoving}
           stageProgress={awaitingMode === mode ? stageProgress : null}
+          triggerWait={awaitingMode === mode ? triggerWait : null}
+          waitStartedAt={awaitingMode === mode ? waitStartedAt : null}
           awaitingQuestion={awaitingMode === mode ? awaitingQuestion : null}
           canvasPins={canvasPins}
-          onCanvasPinsChange={setCanvasPins}
+          onCanvasPinsChange={onCanvasPinsChange}
           onDropPinDraft={dropPinDraft}
         />
       }

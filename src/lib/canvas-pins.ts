@@ -1,4 +1,4 @@
-/** Chat → canvas pin board types (see lessons/PLAN_CHAT_CANVAS_PINS.md). */
+/** Chat → canvas pins — 2-column grid slots (see lessons/PLAN_CHAT_CANVAS_PINS.md). */
 
 import type { VisualizationSpec } from "@/lib/catalog";
 import type {
@@ -7,6 +7,13 @@ import type {
 } from "@/lib/plant-tower";
 
 export type CanvasPinKind = "card" | "viz" | "finding" | "tower" | "findings";
+
+/**
+ * How many grid boxes a chart occupies on a 2-column canvas:
+ * - `1` — one box (half row)
+ * - `2` — two horizontal boxes (full row)
+ */
+export type CanvasSpan = 1 | 2;
 
 export type CardPinMeta = {
   deck?: number;
@@ -46,23 +53,25 @@ export type CanvasPin = {
   sourceMessageId?: string;
   kind: CanvasPinKind;
   payload: CanvasPinPayload;
-  x: number;
-  y: number;
+  /** Flow order on the 2-column grid (lower = earlier). */
+  order: number;
+  /** Slot footprint: 1 | 2-wide. */
+  span: CanvasSpan;
+  /** @deprecated free-float — ignored by grid canvas */
+  x?: number;
+  y?: number;
   w?: number;
   h?: number;
 };
 
 export const CANVAS_DND_MIME = "application/x-plantos-canvas-pin";
+export const CANVAS_REORDER_MIME = "application/x-plantos-canvas-reorder";
 
 export type CanvasPinDraft = {
   kind: CanvasPinKind;
   payload: CanvasPinPayload;
   sourceMessageId?: string;
 };
-
-export const CARD_PIN_W = 300;
-export const CARD_PIN_H = 320;
-export const CARD_PIN_GAP = 16;
 
 export function newPinId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -71,37 +80,36 @@ export function newPinId() {
   return `pin_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Cascade for a single new pin — does not reshuffle existing pins. */
-export function nextCascadePosition(existing: CanvasPin[]) {
-  const i = existing.length;
-  return {
-    x: 16 + (i % 3) * 24,
-    y: 16 + (i % 4) * 24,
-  };
+export function nextOrder(existing: CanvasPin[]) {
+  if (!existing.length) return 0;
+  return Math.max(...existing.map((p) => p.order)) + 1;
 }
 
-function defaultSize(kind: CanvasPinKind): { w: number; h: number } {
-  if (kind === "card" || kind === "finding") return { w: CARD_PIN_W, h: CARD_PIN_H };
-  if (kind === "viz") return { w: 320, h: 260 };
-  return { w: CARD_PIN_W, h: CARD_PIN_H };
+export function normalizeSpan(span: number | undefined): CanvasSpan {
+  return span === 2 ? 2 : 1;
 }
 
-export function createPin(
-  draft: CanvasPinDraft,
-  existing: CanvasPin[],
-  at?: { x: number; y: number }
-): CanvasPin {
-  const pos = at ?? nextCascadePosition(existing);
-  const size = defaultSize(draft.kind);
+export function spanLabel(span: CanvasSpan) {
+  return span === 2 ? "2 wide" : "1 box";
+}
+
+export function cycleSpan(span: CanvasSpan): CanvasSpan {
+  return span === 1 ? 2 : 1;
+}
+
+export function gridStyleForSpan(span: CanvasSpan): { gridColumn: string; gridRow: string } {
+  if (span === 2) return { gridColumn: "span 2", gridRow: "span 1" };
+  return { gridColumn: "span 1", gridRow: "span 1" };
+}
+
+export function createPin(draft: CanvasPinDraft, existing: CanvasPin[]): CanvasPin {
   return {
     id: newPinId(),
     sourceMessageId: draft.sourceMessageId,
     kind: draft.kind,
     payload: draft.payload,
-    x: pos.x,
-    y: pos.y,
-    w: size.w,
-    h: size.h,
+    order: nextOrder(existing),
+    span: 1,
   };
 }
 
@@ -135,19 +143,19 @@ export function boundCardPinId(tower: PlantTowerPayload, cardType: string) {
 }
 
 /**
- * Land / refresh a bound tower as **four independent card pins**.
- * Updates bindings in place — never moves or resizes existing pins.
+ * Land / refresh a bound tower as independent card pins on the grid.
+ * Updates bindings only — never changes order/span; never resurrects dismissed ids.
  */
 export function upsertBoundTowerAsCards(
   existing: CanvasPin[],
-  tower: PlantTowerPayload
+  tower: PlantTowerPayload,
+  dismissedIds?: ReadonlySet<string>
 ): CanvasPin[] {
   let next = [...existing];
-  // Drop legacy whole-tower pin for this question if present.
   const legacyId = `bound_${tower.mode ?? tower.role}_q${tower.questionIndex ?? 0}`;
   next = next.filter((p) => p.id !== legacyId);
 
-  tower.cards.forEach((card, i) => {
+  tower.cards.forEach((card) => {
     const id = boundCardPinId(tower, card.type);
     const payload: CanvasPinPayload = {
       kind: "card",
@@ -166,45 +174,69 @@ export function upsertBoundTowerAsCards(
       next[idx] = { ...next[idx], kind: "card", payload };
       return;
     }
-    const col = i % 2;
-    const row = Math.floor(i / 2);
+    if (dismissedIds?.has(id)) return;
+
     next.push({
       id,
       kind: "card",
       payload,
-      x: 16 + col * (CARD_PIN_W + CARD_PIN_GAP),
-      y: 16 + row * (CARD_PIN_H + CARD_PIN_GAP),
-      w: CARD_PIN_W,
-      h: CARD_PIN_H,
+      order: nextOrder(next),
+      span: 1,
     });
   });
   return next;
 }
 
-/** @deprecated use upsertBoundTowerAsCards */
-export function upsertBoundTowerPin(existing: CanvasPin[], tower: PlantTowerPayload): CanvasPin[] {
-  return upsertBoundTowerAsCards(existing, tower);
+export function clearDismissedForBoundQuestion(
+  dismissed: Set<string>,
+  mode: string,
+  questionIndex: number
+) {
+  const prefix = `bound_${mode}_q${questionIndex}_`;
+  for (const id of [...dismissed]) {
+    if (id.startsWith(prefix)) dismissed.delete(id);
+  }
 }
 
-/** Expand a tower draft into individual card pins (e.g. accidental whole-tower pin). */
+/** @deprecated */
+export function upsertBoundTowerPin(
+  existing: CanvasPin[],
+  tower: PlantTowerPayload,
+  dismissedIds?: ReadonlySet<string>
+): CanvasPin[] {
+  return upsertBoundTowerAsCards(existing, tower, dismissedIds);
+}
+
 export function expandTowerIntoCardPins(
   existing: CanvasPin[],
   tower: PlantTowerPayload,
-  sourceMessageId?: string,
-  at?: { x: number; y: number }
+  sourceMessageId?: string
 ): CanvasPin[] {
   let next = [...existing];
-  const origin = at ?? nextCascadePosition(existing);
-  tower.cards.forEach((card, i) => {
-    const col = i % 2;
-    const row = Math.floor(i / 2);
+  for (const card of tower.cards) {
     const draft = cardDraftFromTower(tower, card, sourceMessageId);
-    next.push({
-      ...createPin(draft, next, {
-        x: origin.x + col * (CARD_PIN_W + CARD_PIN_GAP),
-        y: origin.y + row * (CARD_PIN_H + CARD_PIN_GAP),
-      }),
-    });
-  });
+    next = [...next, createPin(draft, next)];
+  }
   return next;
+}
+
+/** Swap flow order of two pins (grid reorder). */
+export function swapPinOrder(pins: CanvasPin[], aId: string, bId: string): CanvasPin[] {
+  const a = pins.find((p) => p.id === aId);
+  const b = pins.find((p) => p.id === bId);
+  if (!a || !b || aId === bId) return pins;
+  return pins.map((p) => {
+    if (p.id === aId) return { ...p, order: b.order };
+    if (p.id === bId) return { ...p, order: a.order };
+    return p;
+  });
+}
+
+export function setPinSpan(pins: CanvasPin[], id: string, span: CanvasSpan): CanvasPin[] {
+  const next = normalizeSpan(span);
+  return pins.map((p) => (p.id === id ? { ...p, span: next } : p));
+}
+
+export function sortedPins(pins: CanvasPin[]) {
+  return [...pins].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }

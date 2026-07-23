@@ -17,7 +17,7 @@ import {
 } from "recharts";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { formatAxisTime } from "@/lib/axis-time";
-import { useCardLive } from "./card-live-context";
+import { useCardLive, useChartHeight } from "./card-live-context";
 
 /** Extra bottom room for angled "Jul 22 20:00" ticks (Trigger-style). */
 export const chartMargin = { top: 10, right: 10, left: 2, bottom: 52 };
@@ -101,8 +101,9 @@ function tipContent(unit: string | undefined, valueDecimals: number) {
 }
 
 /**
- * Measure parent width and pass numeric width/height into Recharts.
+ * Fill parent and measure width+height for Recharts.
  * Avoid ResponsiveContainer — it often paints nothing when layout width is still 0.
+ * Canvas span drives min height via ChartHeightContext (1 box vs 2-wide).
  */
 function ChartShell({
   children,
@@ -113,16 +114,27 @@ function ChartShell({
   mark: string;
   testId: string;
 }) {
+  const minHeight = useChartHeight(CHART_H);
   const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(320);
+  const [size, setSize] = useState({ width: 320, height: minHeight });
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
 
     const measure = () => {
-      const w = Math.floor(el.getBoundingClientRect().width);
-      if (w > 0) setWidth(w);
+      const r = el.getBoundingClientRect();
+      const w = Math.floor(r.width);
+      const h = Math.floor(r.height);
+      setSize((prev) => {
+        const next = {
+          width: w > 0 ? Math.max(w, 160) : prev.width,
+          // Prefer measured box; never smaller than the span-driven minHeight.
+          height: Math.max(h > 0 ? h : minHeight, minHeight),
+        };
+        if (next.width === prev.width && next.height === prev.height) return prev;
+        return next;
+      });
     };
 
     measure();
@@ -133,18 +145,18 @@ function ChartShell({
       ro.disconnect();
       window.clearTimeout(t);
     };
-  }, []);
+  }, [minHeight]);
 
   return (
     <div
       ref={ref}
       className="w-full min-w-0"
-      style={{ height: CHART_H }}
+      style={{ height: minHeight, minHeight }}
       data-interactive={mark}
       data-testid={testId}
       data-chart-mark="true"
     >
-      {children({ width: Math.max(width, 160), height: CHART_H })}
+      {children(size)}
     </div>
   );
 }
@@ -304,8 +316,9 @@ export function InteractiveLineChart({
 /** Interactive donut with legend + hover. */
 export function InteractivePieChart({ unit: unitProp }: { unit?: string }) {
   const bound = useCardLive();
+  const chartH = useChartHeight(CHART_H);
   const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(200);
+  const [box, setBox] = useState({ width: 200, height: chartH });
   const data =
     bound?.items?.length && bound.items.length >= 2
       ? bound.items.slice(0, 4).map((it) => ({
@@ -324,8 +337,17 @@ export function InteractivePieChart({ unit: unitProp }: { unit?: string }) {
     const el = ref.current;
     if (!el) return;
     const measure = () => {
-      const w = Math.floor(el.getBoundingClientRect().width);
-      if (w > 0) setWidth(w);
+      const r = el.getBoundingClientRect();
+      const w = Math.floor(r.width);
+      const h = Math.floor(r.height);
+      setBox((prev) => {
+        const next = {
+          width: w > 0 ? Math.max(w, 120) : prev.width,
+          height: Math.max(h > 0 ? h : chartH, chartH),
+        };
+        if (next.width === prev.width && next.height === prev.height) return prev;
+        return next;
+      });
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -335,18 +357,19 @@ export function InteractivePieChart({ unit: unitProp }: { unit?: string }) {
       ro.disconnect();
       window.clearTimeout(t);
     };
-  }, []);
+  }, [chartH]);
 
-  const size = Math.max(width, 120);
+  const side = Math.min(box.width, box.height);
   return (
     <div
-      className="grid h-[208px] w-full grid-cols-[1fr_auto] items-center gap-2"
+      className="grid w-full grid-cols-[1fr_auto] items-center gap-2"
+      style={{ height: chartH, minHeight: chartH }}
       data-interactive="pie"
       data-testid="interactive-pie"
       data-chart-mark="true"
     >
-      <div ref={ref} className="min-w-0">
-        <PieChart width={size} height={CHART_H}>
+      <div ref={ref} className="h-full min-h-0 min-w-0">
+        <PieChart width={box.width} height={box.height}>
           <Tooltip
             allowEscapeViewBox={{ x: true, y: true }}
             isAnimationActive={false}
@@ -359,8 +382,8 @@ export function InteractivePieChart({ unit: unitProp }: { unit?: string }) {
             nameKey="name"
             cx="50%"
             cy="50%"
-            innerRadius={Math.min(size, CHART_H) * 0.22}
-            outerRadius={Math.min(size, CHART_H) * 0.36}
+            innerRadius={side * 0.22}
+            outerRadius={side * 0.36}
             paddingAngle={2}
             stroke="none"
             isAnimationActive={false}

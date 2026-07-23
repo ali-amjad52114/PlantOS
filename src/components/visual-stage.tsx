@@ -1,11 +1,13 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
 import { CanvasPinBoard } from "@/components/canvas-pin-board";
 import { OverviewPanel } from "@/components/overview-panel";
+import { OutboundShareBar } from "@/components/outbound-share-bar";
+import { TriggerWaitState } from "@/components/trigger-wait-state";
 import type { PopulateProgress } from "@/components/plant-chat";
 import type { ShellMode } from "@/components/plant-shell";
 import type { CanvasPin, CanvasPinDraft } from "@/lib/canvas-pins";
+import type { TriggerWaitView } from "@/lib/trigger-wait-phases";
 import type { PlantTowerPayload } from "@/lib/plant-tower";
 import { MODE_QUESTIONS } from "@/lib/shell-prompts";
 
@@ -26,6 +28,8 @@ export function VisualStage({
   onAskQuestion,
   liveMoving,
   stageProgress = null,
+  triggerWait = null,
+  waitStartedAt = null,
   awaitingQuestion = null,
   canvasPins = [],
   onCanvasPinsChange,
@@ -41,10 +45,12 @@ export function VisualStage({
   onAskQuestion?: (question: string) => void;
   liveMoving?: boolean;
   stageProgress?: PopulateProgress | null;
+  triggerWait?: TriggerWaitView | null;
+  waitStartedAt?: number | null;
   awaitingQuestion?: string | null;
   canvasPins?: CanvasPin[];
   onCanvasPinsChange?: (next: CanvasPin[]) => void;
-  onDropPinDraft?: (draft: CanvasPinDraft, at: { x: number; y: number }) => void;
+  onDropPinDraft?: (draft: CanvasPinDraft) => void;
 }) {
   const title =
     mode === "overview"
@@ -55,10 +61,49 @@ export function VisualStage({
           ? "Safety"
           : `${agentRole[0].toUpperCase()}${agentRole.slice(1)}`;
 
-  const waiting = Boolean(stageProgress);
+  const waiting = Boolean(triggerWait || stageProgress);
   const questions = MODE_QUESTIONS[mode];
   const showBoard = Boolean(onCanvasPinsChange && onDropPinDraft);
   const showStarters = showBoard && !waiting && mode !== "overview" && canvasPins.length === 0;
+
+  const shareDraft = (() => {
+    if (canvasPins.length > 0) {
+      const lines = canvasPins.slice(0, 6).map((p, i) => {
+        if (p.payload.kind === "card") {
+          const c = p.payload.card;
+          const primary =
+            c.binding?.primary != null && Number.isFinite(Number(c.binding.primary))
+              ? ` — ${Number(c.binding.primary).toFixed(2)}${c.binding.unit ? ` ${c.binding.unit}` : ""}`
+              : "";
+          return `${i + 1}. ${c.label || c.type}${c.hint ? ` (${c.hint})` : ""}${primary}`;
+        }
+        if (p.payload.kind === "finding") {
+          const it = p.payload.item;
+          return `${i + 1}. ${it.label}: ${it.value}${it.unit ? ` ${it.unit}` : ""}`;
+        }
+        if (p.payload.kind === "viz") {
+          return `${i + 1}. Viz: ${p.payload.spec.root || "chart"}`;
+        }
+        return `${i + 1}. ${p.kind} pin`;
+      });
+      return {
+        title: `${title} · ${canvasPins.length} chart${canvasPins.length === 1 ? "" : "s"}`,
+        body: `${lines.join("\n")}\n\nLive max: ${live?.live?.max_ts ?? "—"}`,
+      };
+    }
+    if (mode === "overview" && overview) {
+      return {
+        title: "Plant overview",
+        body: `PlantOS overview snapshot at ${live?.live?.max_ts ?? "now"}.`,
+      };
+    }
+    return {
+      title: `${title} update`,
+      body: awaitingQuestion
+        ? `Question: ${awaitingQuestion}`
+        : "PlantOS canvas share (add charts to include metrics).",
+    };
+  })();
 
   return (
     <div className="card-surface flex h-full min-h-0 flex-col overflow-hidden">
@@ -69,7 +114,7 @@ export function VisualStage({
         </div>
         <div className="text-right text-[11px] text-muted-foreground">
           <p>
-            {canvasPins.length} chart{canvasPins.length === 1 ? "" : "s"} · move · resize · zoom
+            {canvasPins.length} chart{canvasPins.length === 1 ? "" : "s"} · slots · resize · zoom
           </p>
           <p>
             Live max {live?.live?.max_ts ?? "—"}
@@ -87,7 +132,7 @@ export function VisualStage({
             emptyHint={
               mode === "overview"
                 ? undefined
-                : "Pin or drag charts from chat onto this canvas — move, resize, zoom, or remove them here."
+                : "Pin or drag charts from chat. Each sits in a grid slot — 1 box or 2 wide."
             }
             overviewSlot={
               mode === "overview" ? (
@@ -102,9 +147,16 @@ export function VisualStage({
           />
         ) : null}
 
-        {waiting && stageProgress ? (
-          <div className="absolute inset-0 z-30 bg-background/70 p-4 backdrop-blur-[2px]">
-            <StageWaitingPanel progress={stageProgress} question={awaitingQuestion} />
+        {waiting && triggerWait ? (
+          <div
+            data-testid="trigger-wait-overlay"
+            className="absolute inset-0 z-30 flex flex-col justify-start bg-background/70 p-4 pt-3 backdrop-blur-[2px]"
+          >
+            <TriggerWaitState
+              view={triggerWait}
+              question={awaitingQuestion}
+              startedAt={waitStartedAt}
+            />
           </div>
         ) : null}
 
@@ -120,42 +172,8 @@ export function VisualStage({
           </div>
         ) : null}
       </div>
-    </div>
-  );
-}
 
-function StageWaitingPanel({
-  progress,
-  question,
-}: {
-  progress: PopulateProgress;
-  question?: string | null;
-}) {
-  const pct = Math.max(0, Math.min(100, Math.round(progress.percentage)));
-  return (
-    <div className="rise flex h-full min-h-[240px] flex-col justify-center rounded-2xl border border-border bg-surface/95 px-5 py-8">
-      <div className="mb-4 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        Preparing canvas
-      </div>
-      <h3 className="text-xl font-semibold tracking-tight">Charts land on the canvas</h3>
-      <p className="mt-2 max-w-lg text-sm text-muted-foreground">
-        When ready, the bound visual is pinned here so you can move, resize, and zoom it.
-      </p>
-      {question && (
-        <p className="mt-3 max-w-lg rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground/90">
-          {question}
-        </p>
-      )}
-      <div className="mt-6 max-w-lg">
-        <div className="mb-1.5 flex items-center justify-between gap-2 text-sm">
-          <span className="font-medium text-foreground">{progress.label}</span>
-          <span className="tabular text-muted-foreground">{pct}%</span>
-        </div>
-        <div className="mb-3 h-2 overflow-hidden rounded-full bg-muted">
-          <div className="h-full bg-primary transition-all duration-300" style={{ width: `${pct}%` }} />
-        </div>
-      </div>
+      <OutboundShareBar draft={shareDraft} />
     </div>
   );
 }
@@ -177,7 +195,7 @@ function EmptyPersonaStage({
       </p>
       <h3 className="mt-2 text-xl font-semibold tracking-tight">Ask to create charts</h3>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">
-        Answers pin onto this canvas. Drag more from chat anytime — then move, resize, zoom, or remove.
+        Answers pin into grid slots. Drag to reorder, cycle size (1 ↔ 2-wide), zoom, or remove.
       </p>
       <div className="mt-5 grid gap-2">
         {questions.map((q, i) => (

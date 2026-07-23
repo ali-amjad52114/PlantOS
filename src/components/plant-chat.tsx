@@ -26,6 +26,9 @@ import {
 import { cardDraftFromTower, type CanvasPinDraft } from "@/lib/canvas-pins";
 import { normalizeSpec } from "@/lib/catalog";
 import type { PlantTowerPayload } from "@/lib/plant-tower";
+import {
+  type TriggerWaitSignals,
+} from "@/lib/trigger-wait-phases";
 import type { plantAgent } from "@/trigger/plant-agent";
 
 type Role = "engineer" | "operations" | "finance";
@@ -59,6 +62,7 @@ export function PlantChat({
   onAgentBusyChange,
   onAgentError,
   onPinVisual,
+  onTriggerWait,
   fixtureTower = null,
 }: {
   role: Role;
@@ -81,6 +85,8 @@ export function PlantChat({
   onAgentError?: (message: string, chatMode: string) => void;
   /** Pin a chat visual onto the right canvas (PLAN_CHAT_CANVAS_PINS). */
   onPinVisual?: (draft: CanvasPinDraft) => void;
+  /** Ambient Trigger wait signals for the canvas overlay. */
+  onTriggerWait?: (signals: TriggerWaitSignals, chatMode: string) => void;
   /** E2E / demo: pinable tower without waiting on the agent. */
   fixtureTower?: PlantTowerPayload | null;
 }) {
@@ -168,6 +174,7 @@ export function PlantChat({
       onAgentBusyChange={onAgentBusyChange}
       onAgentError={onAgentError}
       onPinVisual={onPinVisual}
+      onTriggerWait={onTriggerWait}
       fixtureTower={fixtureTower}
     />
   );
@@ -194,6 +201,7 @@ function ChatSession({
   onAgentBusyChange,
   onAgentError,
   onPinVisual,
+  onTriggerWait,
   fixtureTower,
 }: {
   chatId: string;
@@ -216,6 +224,7 @@ function ChatSession({
   onAgentBusyChange?: (busy: boolean, chatMode: string) => void;
   onAgentError?: (message: string, chatMode: string) => void;
   onPinVisual?: (draft: CanvasPinDraft) => void;
+  onTriggerWait?: (signals: TriggerWaitSignals, chatMode: string) => void;
   fixtureTower?: PlantTowerPayload | null;
 }) {
   const transport = useTriggerChatTransport<typeof plantAgent>({
@@ -330,6 +339,31 @@ function ChatSession({
     onStreamProgress?.(streamProgress);
   }, [streamProgressKey, streamProgress, onStreamProgress]);
 
+  const waitStartedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!onTriggerWait) return;
+    if (busy && waitStartedRef.current == null) waitStartedRef.current = Date.now();
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    const parts = (lastAssistant?.parts ?? []) as TriggerWaitSignals["parts"];
+    const elapsedMs = waitStartedRef.current
+      ? Math.max(0, Date.now() - waitStartedRef.current)
+      : 0;
+    onTriggerWait(
+      {
+        chatStatus: status,
+        parts,
+        elapsedMs,
+        chatId,
+      },
+      mode
+    );
+    if (!busy && waitStartedRef.current != null && status === "ready") {
+      window.setTimeout(() => {
+        waitStartedRef.current = null;
+      }, 2000);
+    }
+  }, [messages, status, busy, chatId, mode, onTriggerWait]);
+
   const lastErrorMsg = useRef<string | null>(null);
   useEffect(() => {
     if (!error?.message) return;
@@ -370,7 +404,7 @@ function ChatSession({
       }
     >
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-[132px] shrink-0 flex-col border-r border-border bg-surface-2/70 sm:w-[148px]">
+        <aside className="flex w-[132px] shrink-0 flex-col border-r-2 border-border bg-surface-2/70 sm:w-[148px]">
           <div className="border-b border-border px-2 py-2">
             <button
               type="button"
@@ -423,14 +457,10 @@ function ChatSession({
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3 text-xs text-muted-foreground">
-            <span>
-              Ask agent ·{" "}
-              <span className="capitalize text-primary">
-                {mode}
-              </span>
+          <div className="flex items-center justify-center border-b border-border px-4 py-3">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground">
+              Ask Agent
             </span>
-            <span className="uppercase tracking-wide">{status}</span>
           </div>
 
           {populateProgress && (

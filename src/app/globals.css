@@ -310,3 +310,23 @@ body {
     animation: none;
   }
 }
+
+@media (min-width: 1180px) {
+  .plantos-primary-nav {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}
+
+@media (min-width: 1024px) {
+  .plantos-workspace > section > .card-surface {
+    border-width: 2px;
+    border-color: var(--color-border);
+    border-radius: 0;
+  }
+
+  .plantos-workspace > section + section > .card-surface {
+    border-left: 0;
+  }
+}

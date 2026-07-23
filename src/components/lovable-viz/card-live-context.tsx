@@ -9,3 +9,10 @@ export const CardLiveContext = createContext<CardBinding | null>(null);
 export function useCardLive() {
   return useContext(CardLiveContext);
 }
+
+/** Pixel height for the interactive chart area (same for 1 box and 2-wide). */
+export const ChartHeightContext = createContext<number | null>(null);
+
+export function useChartHeight(fallback = 228) {
+  return useContext(ChartHeightContext) ?? fallback;
+}
